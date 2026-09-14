@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
 import { CalendarEvent, Task, Vendor } from '@/lib/types'
@@ -18,15 +19,20 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent } from '@/components/ui/dialog'
-import { Calendar as CalendarIcon, Plus, Trash2, Pencil, CheckCircle2 } from 'lucide-react'
-import { EVENT_TYPES, EVENT_STATUSES, EVENT_TYPE_LABELS, formatDate } from '@/lib/utils'
+import { Calendar as CalendarIcon, Plus, Trash2, Pencil, CheckCircle2, Flame, Clock } from 'lucide-react'
+import { EVENT_TYPES, EVENT_STATUSES, EVENT_TYPE_LABELS, formatDate, cn } from '@/lib/utils'
 
-export default function CalendrierPage() {
+function CalendrierContent() {
   const supabase = createClient()
+  const searchParams = useSearchParams()
+  const urlFilter = searchParams.get('filter')
+  const listRef = useRef<HTMLDivElement>(null)
+
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [loading, setLoading] = useState(true)
+  const [eventFilter, setEventFilter] = useState<'TOUS' | 'A_VENIR' | 'PASSE'>('TOUS')
   
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [isEditOpen, setIsEditOpen] = useState(false)
@@ -43,6 +49,15 @@ export default function CalendrierPage() {
   const [status, setStatus] = useState('à venir')
   const [taskId, setTaskId] = useState('')
   const [vendorId, setVendorId] = useState('')
+
+  useEffect(() => {
+    if (urlFilter === 'a_venir') {
+      setEventFilter('A_VENIR')
+      setTimeout(() => {
+        listRef.current?.scrollIntoView({ behavior: 'smooth' })
+      }, 400)
+    }
+  }, [urlFilter])
 
   useEffect(() => {
     fetchEvents()
@@ -177,13 +192,16 @@ export default function CalendrierPage() {
     }
   })
 
-  const upcomingEvents = events.filter(e => new Date(e.event_date) >= new Date(new Date().setHours(0,0,0,0)))
+  const today = new Date(new Date().setHours(0,0,0,0))
+  const upcomingEvents = events.filter(e => new Date(e.event_date) >= today)
+  const pastEvents = events.filter(e => new Date(e.event_date) < today)
+  const displayedEvents = eventFilter === 'A_VENIR' ? upcomingEvents : eventFilter === 'PASSE' ? pastEvents : events
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold tracking-tight">Calendrier</h1>
-        <Button onClick={() => { resetForm(); setEventDate(new Date().toISOString().split('T')[0]); setIsAddOpen(true); }}>
+        <Button onClick={() => { resetForm(); setEventDate(new Date().toISOString().split('T')[0]); setIsAddOpen(true); }} className="cursor-pointer">
           <Plus className="mr-2 h-4 w-4" /> Nouvel événement
         </Button>
       </div>
@@ -213,26 +231,70 @@ export default function CalendrierPage() {
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
-        <h2 className="text-2xl font-semibold tracking-tight">Événements à venir</h2>
+      <div ref={listRef} className="space-y-4 pt-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+            {eventFilter === 'A_VENIR' ? 'Événements à venir' : eventFilter === 'PASSE' ? 'Événements passés' : 'Tous les événements'}
+          </h2>
+
+          {/* Filtres d'affichage */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setEventFilter('TOUS')}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
+                eventFilter === 'TOUS' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              )}
+            >
+              Tous ({events.length})
+            </button>
+            <button
+              onClick={() => setEventFilter('A_VENIR')}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs",
+                eventFilter === 'A_VENIR' ? "bg-purple-600 text-white ring-2 ring-purple-300" : "bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200"
+              )}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              À venir uniquement ({upcomingEvents.length})
+            </button>
+            <button
+              onClick={() => setEventFilter('PASSE')}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
+                eventFilter === 'PASSE' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              )}
+            >
+              Passés ({pastEvents.length})
+            </button>
+          </div>
+        </div>
+
         {loading ? (
-          <p>Chargement...</p>
-        ) : upcomingEvents.length === 0 ? (
-          <p className="text-muted-foreground">Aucun événement à venir.</p>
+          <p className="text-slate-500">Chargement...</p>
+        ) : displayedEvents.length === 0 ? (
+          <p className="text-muted-foreground">Aucun événement ne correspond à ce filtre.</p>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {upcomingEvents.map(event => {
+            {displayedEvents.map(event => {
               const typeLabel = EVENT_TYPE_LABELS[event.event_type] || event.event_type
               const isPastEvent = event.status === 'passé'
-              const borderClass = isPastEvent ? 'border-l-4 border-l-slate-400' : 
-                                 event.status === 'en attente' ? 'border-l-4 border-l-amber-500' : 'border-l-4 border-l-blue-500'
               const linkedTask = tasks.find(t => t.id === event.task_id)
               const linkedVendor = vendors.find(v => v.id === event.vendor_id)
+              const isLinkedUrgent = linkedTask?.priority === 'haute'
+
+              const borderClass = isLinkedUrgent 
+                ? 'border-l-[5px] border-l-red-600 border-red-200 bg-red-50/20' 
+                : isPastEvent 
+                ? 'border-l-4 border-l-slate-400' 
+                : event.status === 'en attente' 
+                ? 'border-l-4 border-l-amber-500' 
+                : 'border-l-4 border-l-blue-500'
 
               return (
                 <Card 
                   key={event.id} 
-                  className={`${borderClass} cursor-pointer hover:bg-slate-50 transition-all`} 
+                  className={`${borderClass} cursor-pointer hover:shadow-sm transition-all`} 
                   onClick={() => handleEventClick({event: {id: event.id}})}
                 >
                   <CardHeader className="pb-2">
@@ -282,9 +344,16 @@ export default function CalendrierPage() {
                     )}
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {linkedTask && (
-                        <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-800 border-blue-200">
-                          Tâche : {linkedTask.title}
-                        </Badge>
+                        isLinkedUrgent ? (
+                          <Badge className="text-[11px] bg-red-600 text-white font-bold flex items-center gap-1 shadow-xs border-red-700">
+                            <Flame className="w-3 h-3 fill-amber-300 text-amber-300" />
+                            Tâche urgente : {linkedTask.title}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-800 border-blue-200">
+                            Tâche : {linkedTask.title}
+                          </Badge>
+                        )
                       )}
                       {linkedVendor && (
                         <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-800 border-amber-200">
@@ -491,5 +560,13 @@ export default function CalendrierPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+export default function CalendrierPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Chargement du calendrier...</div>}>
+      <CalendrierContent />
+    </Suspense>
   )
 }

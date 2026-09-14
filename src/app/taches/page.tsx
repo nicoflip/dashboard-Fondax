@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -12,15 +13,19 @@ import { Select } from '@/components/ui/select'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { cn, TASK_CATEGORIES, TASK_STATUSES, TASK_PRIORITIES, PRIORITY_COLORS, STATUS_COLORS } from '@/lib/utils'
 import { Task, TaskCategory, TaskPriority, TaskStatus } from '@/lib/types'
-import { Plus, Trash2, CheckCircle2, Clock, Hourglass, Flame, Pencil, Calendar, Check } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, Clock, Hourglass, Flame, Pencil, Calendar, Check, AlertTriangle } from 'lucide-react'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 
-export default function TasksPage() {
+function TasksContent() {
   const supabase = createClient()
+  const searchParams = useSearchParams()
+  const urlTab = searchParams.get('tab')
+  const urlPriority = searchParams.get('priority')
+
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [activeTab, setActiveTab] = useState<'a-traiter' | 'en-attente' | 'terminees' | 'toutes'>('a-traiter')
+  const [activeTab, setActiveTab] = useState<'urgentes' | 'a-traiter' | 'en-attente' | 'terminees' | 'toutes'>('a-traiter')
 
   const [filterCat, setFilterCat] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
@@ -59,6 +64,23 @@ export default function TasksPage() {
     fetchTasks()
   }, [])
 
+  // Sync tab and priority from URL query parameters
+  useEffect(() => {
+    if (urlTab === 'urgentes' || urlPriority === 'haute') {
+      setActiveTab('urgentes')
+      setFilterPriority('haute')
+    } else if (urlTab === 'a-traiter') {
+      setActiveTab('a-traiter')
+      setFilterPriority('all')
+    } else if (urlTab === 'en-attente') {
+      setActiveTab('en-attente')
+    } else if (urlTab === 'terminees') {
+      setActiveTab('terminees')
+    } else if (urlTab === 'toutes') {
+      setActiveTab('toutes')
+    }
+  }, [urlTab, urlPriority])
+
   const fetchTasks = async () => {
     setLoading(true)
     const { data } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })
@@ -68,6 +90,9 @@ export default function TasksPage() {
 
   const filteredTasks = tasks.filter(task => {
     // Quick tabs filter
+    if (activeTab === 'urgentes') {
+      if (task.priority !== 'haute' || task.status === 'fait') return false
+    }
     if (activeTab === 'a-traiter' && !['à faire', 'en cours'].includes(task.status)) return false
     if (activeTab === 'en-attente' && task.status !== 'en attente de retour externe') return false
     if (activeTab === 'terminees' && task.status !== 'fait') return false
@@ -77,6 +102,13 @@ export default function TasksPage() {
     if (filterStatus !== 'all' && task.status !== filterStatus) return false
     if (filterPriority !== 'all' && task.priority !== filterPriority) return false
     return true
+  }).sort((a, b) => {
+    // Priority sorting: 'haute' first, then 'moyenne', then 'basse'
+    const prioOrder: Record<string, number> = { 'haute': 1, 'moyenne': 2, 'basse': 3 }
+    const orderA = prioOrder[a.priority] || 99
+    const orderB = prioOrder[b.priority] || 99
+    if (orderA !== orderB) return orderA - orderB
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
 
   const handleStatusChange = async (taskId: string, newStatus: string) => {
@@ -207,6 +239,7 @@ export default function TasksPage() {
 
   if (loading) return <div className="p-8 text-center text-slate-500">Chargement des tâches...</div>
 
+  const countUrgentes = tasks.filter(t => t.priority === 'haute' && t.status !== 'fait').length
   const countATraiter = tasks.filter(t => ['à faire', 'en cours'].includes(t.status)).length
   const countAttente = tasks.filter(t => t.status === 'en attente de retour externe').length
   const countFait = tasks.filter(t => t.status === 'fait').length
@@ -232,28 +265,60 @@ export default function TasksPage() {
 
       {/* Onglets de filtrage rapide */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4">
+        {/* Onglet URGENTES en premier et mis en valeur */}
         <button 
-          onClick={() => setActiveTab('a-traiter')}
-          className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors", activeTab === 'a-traiter' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
+          onClick={() => {
+            setActiveTab('urgentes')
+            setFilterPriority('all')
+          }}
+          className={cn(
+            "px-4 py-2 rounded-md text-sm font-bold transition-all flex items-center gap-2 shadow-xs cursor-pointer", 
+            activeTab === 'urgentes' 
+              ? "bg-red-600 text-white ring-2 ring-red-400 ring-offset-1" 
+              : "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200"
+          )}
+        >
+          <Flame className={cn("w-4 h-4 shrink-0", activeTab === 'urgentes' ? "fill-amber-300 text-amber-300 animate-pulse" : "text-red-500 fill-red-400")} />
+          <span>Urgentes (Priorité haute)</span>
+          <span className={cn("px-2 py-0.5 rounded-full text-xs font-black", activeTab === 'urgentes' ? "bg-red-800 text-white" : "bg-red-200 text-red-900")}>
+            {countUrgentes}
+          </span>
+        </button>
+
+        <button 
+          onClick={() => {
+            setActiveTab('a-traiter')
+            setFilterPriority('all')
+          }}
+          className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer", activeTab === 'a-traiter' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
         >
           À traiter <span className="ml-1 opacity-70">({countATraiter})</span>
         </button>
         <button 
-          onClick={() => setActiveTab('en-attente')}
-          className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2", activeTab === 'en-attente' ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100")}
+          onClick={() => {
+            setActiveTab('en-attente')
+            setFilterPriority('all')
+          }}
+          className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer", activeTab === 'en-attente' ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100")}
         >
           <Hourglass className="w-4 h-4" />
           En attente retour externe <span className="opacity-70">({countAttente})</span>
         </button>
         <button 
-          onClick={() => setActiveTab('terminees')}
-          className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors", activeTab === 'terminees' ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100")}
+          onClick={() => {
+            setActiveTab('terminees')
+            setFilterPriority('all')
+          }}
+          className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer", activeTab === 'terminees' ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100")}
         >
           Terminées <span className="ml-1 opacity-70">({countFait})</span>
         </button>
         <button 
-          onClick={() => setActiveTab('toutes')}
-          className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors", activeTab === 'toutes' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
+          onClick={() => {
+            setActiveTab('toutes')
+            setFilterPriority('all')
+          }}
+          className={cn("px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer", activeTab === 'toutes' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}
         >
           Toutes <span className="ml-1 opacity-70">({countToutes})</span>
         </button>
@@ -304,13 +369,23 @@ export default function TasksPage() {
         </div>
       </div>
 
-      <div className="text-sm text-slate-500">
-        {filteredTasks.length} tâche(s) trouvée(s)
+      <div className="flex items-center justify-between text-sm text-slate-500">
+        <div>{filteredTasks.length} tâche(s) affichée(s)</div>
+        {activeTab === 'urgentes' && (
+          <div className="flex items-center gap-1.5 text-xs font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md border border-red-200">
+            <Flame className="w-3.5 h-3.5 fill-red-500 text-red-600" />
+            Mode Urgences activé
+          </div>
+        )}
       </div>
 
       {filteredTasks.length === 0 ? (
-        <Card className="flex flex-col items-center justify-center p-8 text-slate-500">
-          <p>Aucune tâche ne correspond à vos critères.</p>
+        <Card className="flex flex-col items-center justify-center p-12 text-slate-500 border-dashed">
+          <Flame className="w-10 h-10 text-slate-300 mb-2" />
+          <p className="font-medium text-slate-600">Aucune tâche ne correspond aux critères sélectionnés.</p>
+          {activeTab === 'urgentes' && (
+            <p className="text-xs text-slate-400 mt-1">Bonne nouvelle ! Aucune tâche prioritaire en attente.</p>
+          )}
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -320,19 +395,51 @@ export default function TasksPage() {
             const isEnCours = task.status === 'en cours'
             const isAFaire = task.status === 'à faire'
             const isHighPrio = task.priority === 'haute'
+            const isUrgent = isHighPrio && !isFait
 
-            const borderClass = isAttente ? 'border-amber-500' : isFait ? 'border-slate-200' : isEnCours ? 'border-blue-500' : 'border-slate-300'
-            const bgClass = isAttente ? 'bg-amber-50/40' : isFait ? 'bg-slate-50 opacity-65' : 'bg-white'
+            // Styling fort pour les tâches urgentes afin qu'elles sautent immédiatement aux yeux
+            const borderClass = isUrgent 
+              ? 'border-l-[6px] border-l-red-600 border-red-300 ring-2 ring-red-400/40 shadow-md shadow-red-100/70' 
+              : isAttente 
+              ? 'border-l-4 border-amber-500' 
+              : isFait 
+              ? 'border-l-4 border-slate-200 opacity-65' 
+              : isEnCours 
+              ? 'border-l-4 border-blue-500' 
+              : 'border-l-4 border-slate-300'
+
+            const bgClass = isUrgent 
+              ? 'bg-gradient-to-br from-red-50/70 via-white to-red-50/30' 
+              : isAttente 
+              ? 'bg-amber-50/40' 
+              : isFait 
+              ? 'bg-slate-50' 
+              : 'bg-white'
 
             return (
-              <Card key={task.id} className={cn("flex flex-col border-l-4 transition-all", borderClass, bgClass)}>
-                <CardHeader className="pb-3">
+              <Card key={task.id} className={cn("flex flex-col transition-all relative overflow-hidden", borderClass, bgClass)}>
+                {/* Bandeau d'alerte URGENT en haut de la carte */}
+                {isUrgent && (
+                  <div className="bg-gradient-to-r from-red-600 via-red-600 to-rose-600 text-white px-3 py-1.5 text-xs font-black shadow-xs flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Flame className="w-4 h-4 fill-amber-300 text-amber-300 animate-pulse shrink-0" />
+                      <span>URGENT — PRIORITÉ HAUTE</span>
+                    </span>
+                    <span className="bg-red-800/90 text-white text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded">
+                      Action immédiate
+                    </span>
+                  </div>
+                )}
+
+                <CardHeader className={cn("pb-3", isUrgent ? "pt-3" : "pt-4")}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       {isFait && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
+                      {isUrgent && <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-bounce" />}
                       <CardTitle 
                         className={cn(
                           "cursor-pointer text-lg hover:text-blue-600 hover:underline truncate",
+                          isUrgent && "font-black text-red-950",
                           isFait && "line-through text-slate-500"
                         )}
                         onClick={() => openEditTaskDialog(task)}
@@ -388,17 +495,26 @@ export default function TasksPage() {
                     {task.description ? (
                       isAttente ? 
                         <span className="text-amber-900 font-medium">{task.description}</span> 
+                        : isUrgent ?
+                        <span className="text-slate-800 font-medium">{task.description}</span>
                         : task.description
                     ) : <span className="italic text-slate-400">Aucune description</span>}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="mt-auto pb-4 space-y-3">
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{task.category}</Badge>
-                    {isHighPrio ? (
-                      <Badge className="bg-red-100 text-red-700 border-red-200 hover:bg-red-200 flex items-center gap-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className={cn(isUrgent && "border-red-200 bg-white text-slate-800 font-semibold")}>
+                      {task.category}
+                    </Badge>
+                    {isUrgent ? (
+                      <Badge className="bg-red-600 text-white font-black flex items-center gap-1 shadow-xs border-red-700">
+                        <Flame className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+                        Haute priorité (Urgent)
+                      </Badge>
+                    ) : isHighPrio ? (
+                      <Badge className="bg-red-100 text-red-700 border-red-200 flex items-center gap-1">
                         <Flame className="w-3 h-3" />
-                        {task.priority}
+                        Haute
                       </Badge>
                     ) : (
                       <Badge className={cn(PRIORITY_COLORS[task.priority])}>{task.priority}</Badge>
@@ -568,5 +684,13 @@ export default function TasksPage() {
         }}
       />
     </div>
+  )
+}
+
+export default function TasksPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Chargement des tâches...</div>}>
+      <TasksContent />
+    </Suspense>
   )
 }

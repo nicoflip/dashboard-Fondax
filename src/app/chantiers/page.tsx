@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -10,13 +11,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { PROJECT_STATUS_COLORS } from '@/lib/utils'
+import { PROJECT_STATUS_COLORS, cn } from '@/lib/utils'
 import { Project, ProjectStatus } from '@/lib/types'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, FolderKanban, CheckCircle2, Clock } from 'lucide-react'
 
-export default function ChantiersPage() {
+function ChantiersContent() {
+  const searchParams = useSearchParams()
+  const urlStatus = searchParams.get('status')
+
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [statusFilter, setStatusFilter] = useState<'TOUS' | 'EN COURS' | 'À FAIRE' | 'TERMINÉ'>('TOUS')
   const supabase = createClient()
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -32,6 +37,12 @@ export default function ChantiersPage() {
     status: 'À FAIRE' as ProjectStatus,
     notes_blockers: ''
   })
+
+  useEffect(() => {
+    if (urlStatus === 'EN_COURS' || urlStatus === 'EN COURS') {
+      setStatusFilter('EN COURS')
+    }
+  }, [urlStatus])
 
   const fetchProjects = async () => {
     setLoading(true)
@@ -115,36 +126,90 @@ export default function ChantiersPage() {
     }
   }
 
+  const inProgressCount = projects.filter(p => p.status === 'EN COURS').length
+  const todoCount = projects.filter(p => p.status === 'À FAIRE').length
   const completedCount = projects.filter(p => p.status === 'TERMINÉ').length
   const totalCount = projects.length
   const progressPercent = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100)
 
+  const displayedProjects = statusFilter === 'TOUS' 
+    ? projects 
+    : projects.filter(p => p.status === statusFilter)
+
   if (loading) return <div className="p-8">Chargement...</div>
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-8">
+    <div className="p-8 max-w-4xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-slate-800">Chantiers IT</h1>
-        <Button onClick={() => setIsAddProjectOpen(true)}>
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">Chantiers IT</h1>
+          <p className="text-sm text-slate-500">Cahier des charges & projets prioritaires Fondax</p>
+        </div>
+        <Button onClick={() => setIsAddProjectOpen(true)} className="cursor-pointer">
           <Plus className="w-4 h-4 mr-2" /> Ajouter un chantier
         </Button>
       </div>
 
-      <div className="bg-slate-100 rounded-lg p-4">
+      <div className="bg-slate-100 rounded-xl p-4 border border-slate-200/80">
         <div className="flex justify-between items-center mb-2">
           <span className="font-semibold text-slate-700">Progression globale</span>
-          <span className="text-sm text-slate-500">{completedCount} / {totalCount} terminés ({progressPercent}%)</span>
+          <span className="text-sm text-slate-500 font-medium">{completedCount} / {totalCount} terminés ({progressPercent}%)</span>
         </div>
         <div className="w-full bg-slate-200 rounded-full h-2.5">
           <div className="bg-blue-600 h-2.5 rounded-full transition-all" style={{ width: `${progressPercent}%` }}></div>
         </div>
       </div>
 
+      {/* Onglets de filtrage par statut */}
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
+        <button
+          onClick={() => setStatusFilter('TOUS')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer",
+            statusFilter === 'TOUS' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          )}
+        >
+          Tous les chantiers <span className="opacity-75">({totalCount})</span>
+        </button>
+        <button
+          onClick={() => setStatusFilter('EN COURS')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-md text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs",
+            statusFilter === 'EN COURS' 
+              ? "bg-blue-600 text-white ring-2 ring-blue-300" 
+              : "bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
+          )}
+        >
+          <Clock className="w-3.5 h-3.5" />
+          En cours uniquement <span className={cn("px-1.5 py-0.2 rounded-full text-xs font-black", statusFilter === 'EN COURS' ? "bg-blue-800 text-white" : "bg-blue-200 text-blue-900")}>{inProgressCount}</span>
+        </button>
+        <button
+          onClick={() => setStatusFilter('À FAIRE')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer",
+            statusFilter === 'À FAIRE' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          )}
+        >
+          À faire <span className="opacity-75">({todoCount})</span>
+        </button>
+        <button
+          onClick={() => setStatusFilter('TERMINÉ')}
+          className={cn(
+            "px-3.5 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer",
+            statusFilter === 'TERMINÉ' ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+          )}
+        >
+          Terminés <span className="opacity-75">({completedCount})</span>
+        </button>
+      </div>
+
       <div className="space-y-4">
-        {projects.length === 0 ? (
-          <div className="text-center text-slate-500 py-12">Aucun chantier.</div>
+        {displayedProjects.length === 0 ? (
+          <div className="text-center text-slate-500 py-12 border rounded-xl bg-slate-50">
+            Aucun chantier ne correspond à ce filtre.
+          </div>
         ) : (
-          projects.map(project => (
+          displayedProjects.map(project => (
             <Card key={project.id} className={`overflow-hidden transition-all ${project.status === 'EN COURS' ? 'border-blue-500 shadow-md ring-1 ring-blue-500' : ''}`}>
               <CardContent className="p-0">
                 <div className="flex flex-col md:flex-row">
@@ -317,5 +382,13 @@ export default function ChantiersPage() {
         </DialogFooter>
       </Dialog>
     </div>
+  )
+}
+
+export default function ChantiersPage() {
+  return (
+    <Suspense fallback={<div className="p-8 max-w-4xl mx-auto text-slate-500">Chargement des chantiers...</div>}>
+      <ChantiersContent />
+    </Suspense>
   )
 }

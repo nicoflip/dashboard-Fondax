@@ -80,9 +80,9 @@ export default function Dashboard() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tableau de Bord IT</h1>
 
-      {/* Stats Cards cliquables */}
+      {/* Stats Cards cliquables avec filtrage ciblé */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Link href="/taches" className="block group">
+        <Link href="/taches?tab=a-traiter" className="block group" title="Voir les tâches ouvertes à traiter">
           <Card className="transition-all duration-200 group-hover:border-blue-400 group-hover:shadow-md cursor-pointer h-full">
             <CardContent className="flex items-center gap-4 p-6">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
@@ -96,21 +96,24 @@ export default function Dashboard() {
           </Card>
         </Link>
         
-        <Link href="/taches" className="block group">
-          <Card className="transition-all duration-200 group-hover:border-red-400 group-hover:shadow-md cursor-pointer h-full">
+        <Link href="/taches?tab=urgentes" className="block group" title="Voir uniquement les tâches urgentes / priorité haute">
+          <Card className="transition-all duration-200 border-red-200 group-hover:border-red-500 group-hover:shadow-md cursor-pointer h-full bg-red-50/20">
             <CardContent className="flex items-center gap-4 p-6">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-red-100 text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
-                <Flame className="h-6 w-6" />
+                <Flame className="h-6 w-6 fill-red-500 animate-pulse" />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-500 group-hover:text-red-600 transition-colors">Priorité haute</p>
-                <h2 className="text-3xl font-bold text-slate-900">{stats.highPriorityTasks}</h2>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-sm font-bold text-red-600">Priorité haute</p>
+                  <span className="text-[10px] font-black bg-red-600 text-white px-1.5 py-0.2 rounded uppercase">Urgent</span>
+                </div>
+                <h2 className="text-3xl font-bold text-red-700">{stats.highPriorityTasks}</h2>
               </div>
             </CardContent>
           </Card>
         </Link>
 
-        <Link href="/chantiers" className="block group">
+        <Link href="/chantiers?status=EN_COURS" className="block group" title="Voir les chantiers en cours">
           <Card className="transition-all duration-200 group-hover:border-emerald-400 group-hover:shadow-md cursor-pointer h-full">
             <CardContent className="flex items-center gap-4 p-6">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
@@ -124,7 +127,7 @@ export default function Dashboard() {
           </Card>
         </Link>
 
-        <Link href="/calendrier" className="block group">
+        <Link href="/calendrier?filter=a_venir" className="block group" title="Voir les événements à venir">
           <Card className="transition-all duration-200 group-hover:border-purple-400 group-hover:shadow-md cursor-pointer h-full">
             <CardContent className="flex items-center gap-4 p-6">
               <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
@@ -142,29 +145,43 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Actions Prioritaires & Alertes */}
         <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-slate-500" />
-                Actions prioritaires
-              </CardTitle>
+          <Card className="border-red-200 shadow-xs">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-red-700">
+                  <Flame className="h-5 w-5 fill-red-500 text-red-600 animate-pulse" />
+                  Actions prioritaires ({highPriorityTasks.length})
+                </CardTitle>
+                <Link 
+                  href="/taches?tab=urgentes" 
+                  className="text-xs font-bold text-red-600 hover:text-red-800 hover:underline flex items-center gap-1"
+                >
+                  Filtrer les urgences &rarr;
+                </Link>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3">
               {highPriorityTasks.length === 0 ? (
-                <p className="text-sm text-slate-500">Aucune action prioritaire.</p>
+                <p className="text-sm text-slate-500">Aucune action prioritaire en attente.</p>
               ) : (
                 highPriorityTasks.map(task => (
-                  <div key={task.id} className="flex items-start justify-between rounded-lg border p-4 shadow-sm">
-                    <div className="space-y-1">
-                      <h4 className="font-semibold text-slate-900">{task.title}</h4>
+                  <div key={task.id} className="flex items-start justify-between rounded-lg border border-red-200 border-l-[5px] border-l-red-600 bg-red-50/40 p-3.5 shadow-xs transition-colors hover:bg-red-50/70">
+                    <div className="space-y-1.5 flex-1 min-w-0 pr-2">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-sm shadow-xs uppercase tracking-wider shrink-0">
+                          <Flame className="w-3 h-3 fill-amber-300 text-amber-300" /> URGENT
+                        </span>
+                        <h4 className="font-bold text-slate-950 text-sm truncate" title={task.title}>{task.title}</h4>
+                      </div>
                       <div className="flex gap-2">
-                        <Badge variant="outline" className="text-xs">{task.category}</Badge>
-                        <Badge className={cn("text-xs", STATUS_COLORS[task.status])}>{task.status}</Badge>
+                        <Badge variant="outline" className="text-xs border-red-200 bg-white text-slate-700">{task.category}</Badge>
+                        <Badge className={cn("text-xs font-semibold", STATUS_COLORS[task.status])}>{task.status}</Badge>
                       </div>
                     </div>
                     <Button 
                       variant="outline" 
                       size="sm" 
+                      className="shrink-0 font-medium hover:bg-red-100 border-red-200 text-red-900 cursor-pointer"
                       onClick={() => toggleTaskStatus(task)}
                     >
                       {task.status === 'en cours' ? 'Terminer' : 'Reprendre'}
