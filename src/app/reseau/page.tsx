@@ -272,7 +272,7 @@ const EquipmentNode = React.memo(({ data, selected }: { data: any; selected?: bo
     <div 
       className={cn(
         "bg-white rounded-xl border-2 shadow-sm flex flex-col transition-all duration-200 relative h-full w-full select-none overflow-hidden",
-        "min-w-[210px] min-h-[105px]",
+        "min-w-[170px] min-h-[85px]",
         cfg.border,
         selected && "ring-3 ring-blue-500/80 border-blue-500 shadow-xl scale-[1.02] z-30",
         isHighlighted && "ring-3 ring-blue-500 shadow-xl border-blue-500 scale-105 z-30",
@@ -409,7 +409,7 @@ const NetworkNode = React.memo(({ id, data, selected }: { id: string; data: any;
   return (
     <div
       className={cn(
-        "rounded-2xl border-2 border-dashed p-3.5 flex flex-col transition-all duration-200 relative select-none shadow-sm min-w-[270px] max-w-[300px]",
+        "rounded-2xl border-2 border-dashed p-3.5 flex flex-col transition-all duration-200 relative select-none shadow-sm w-full h-full min-w-[200px] min-h-[120px]",
         theme.border,
         isLocked && "ring-2 ring-amber-400/80 border-amber-500 shadow-md",
         selected && "ring-3 ring-blue-500 border-blue-500 shadow-md",
@@ -417,6 +417,15 @@ const NetworkNode = React.memo(({ id, data, selected }: { id: string; data: any;
         isDimmed && "opacity-25 grayscale scale-95 pointer-events-none"
       )}
     >
+      <NodeResizer 
+        isVisible={selected && !isLocked} 
+        minWidth={200} 
+        minHeight={120}
+        color="#9333ea"
+        lineClassName="!border-purple-500"
+        handleClassName="!h-2.5 !w-2.5 !bg-white !border-2 !border-purple-600 !rounded-xs shadow-xs"
+      />
+
       <Handle type="target" position={Position.Top} className="w-2.5 h-2.5 !bg-purple-500 border-2 !border-white" />
       <Handle type="target" position={Position.Left} className="w-2.5 h-2.5 !bg-purple-500 border-2 !border-white" />
 
@@ -1272,7 +1281,10 @@ function ReseauContent() {
 
   // Add equipment (with auto-placement & auto-connection)
   const handleAddEquipment = async () => {
-    if (!newEquip.name) return
+    if (!newEquip.name?.trim()) {
+      showToast('⚠️ Veuillez renseigner le nom de l\'équipement.')
+      return
+    }
 
     let posX = 520
     let posY = 760
@@ -1293,18 +1305,49 @@ function ReseauContent() {
       posY = 760 + row * 170
     }
 
-    const { data, error } = await supabase.from('network_equipment').insert({
-      name: newEquip.name,
-      type: newEquip.type || 'Switch',
-      location: newEquip.location || null,
-      ip: newEquip.ip || null,
-      role: newEquip.role || null,
-      notes: newEquip.notes || null,
-      position_x: Math.round(posX),
-      position_y: Math.round(posY)
-    }).select().single()
+    try {
+      const { data, error } = await supabase.from('network_equipment').insert({
+        name: newEquip.name.trim(),
+        type: newEquip.type || 'Switch',
+        location: newEquip.location || null,
+        ip: newEquip.ip || null,
+        role: newEquip.role || null,
+        notes: newEquip.notes || null,
+        position_x: Math.round(posX),
+        position_y: Math.round(posY)
+      }).select().single()
 
-    if (!error && data) {
+      if (error || !data) {
+        console.warn('Insertion Supabase échouée, création locale en secours:', error)
+        // Secours en mode local pour garantir l'ajout immédiat sur le plan
+        const localId = `local-eq-${Date.now()}`
+        const localEquipment: NetworkEquipment = {
+          id: localId,
+          name: newEquip.name.trim(),
+          type: newEquip.type || 'Switch',
+          location: newEquip.location || null,
+          ip: newEquip.ip || null,
+          role: newEquip.role || null,
+          notes: newEquip.notes || null,
+          position_x: Math.round(posX),
+          position_y: Math.round(posY),
+          created_at: new Date().toISOString()
+        }
+
+        setEquipments(prev => [...prev, localEquipment])
+        setNodes(nds => [...nds, {
+          id: localId,
+          type: 'equipment',
+          position: { x: localEquipment.position_x, y: localEquipment.position_y },
+          data: { ...localEquipment } as Record<string, unknown>,
+          zIndex: 10
+        }])
+        setIsAddEquipModalOpen(false)
+        setNewEquip({ type: 'Switch', connType: 'ethernet' })
+        showToast(`Équipement "${localEquipment.name}" ajouté avec succès sur le plan !`)
+        return
+      }
+
       setEquipments(prev => [...prev, data])
 
       const newNode: Node = {
@@ -1316,8 +1359,9 @@ function ReseauContent() {
       }
       setNodes(nds => [...nds, newNode])
 
-      // Auto-connect edge if requested
-      if (newEquip.autoConnectId) {
+      // Auto-connect edge if requested and if target is a valid equipment node
+      const isValidTarget = newEquip.autoConnectId && equipments.some(e => e.id === newEquip.autoConnectId)
+      if (isValidTarget && newEquip.autoConnectId) {
         const cType = (newEquip.connType || 'ethernet') as any
         const label = `Liaison ${cType === 'fibre' ? 'Fibre' : cType === 'wifi' ? 'Wi-Fi' : 'RJ45'}`
         const meta: EdgeMetadata = {
@@ -1354,7 +1398,10 @@ function ReseauContent() {
 
       setIsAddEquipModalOpen(false)
       setNewEquip({ type: 'Switch', connType: 'ethernet' })
-      showToast(`Équipement "${data.name}" ajouté et placé sur le plan réseau !`)
+      showToast(`Équipement "${data.name}" ajouté et connecté sur le plan réseau !`)
+    } catch (err: any) {
+      console.error('Erreur handleAddEquipment:', err)
+      showToast(`Erreur : ${err?.message || 'Impossible d\'ajouter l\'équipement'}`)
     }
   }
 

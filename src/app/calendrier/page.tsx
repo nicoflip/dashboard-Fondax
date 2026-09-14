@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent } from '@/components/ui/dialog'
+import { CustomDatePicker } from '@/components/ui/date-picker'
 import { Calendar as CalendarIcon, Plus, Trash2, Pencil, CheckCircle2, Flame, Clock, Sparkles } from 'lucide-react'
 import { EVENT_TYPES, EVENT_STATUSES, EVENT_TYPE_LABELS, formatDate, cn } from '@/lib/utils'
 
@@ -646,11 +647,11 @@ function CalendrierContent() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label className="text-xs text-slate-600">Début estimé</Label>
-                      <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className="bg-white" />
+                      <CustomDatePicker value={eventDate} onChange={setEventDate} placeholder="Date de début" />
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs text-slate-600">Fin estimée</Label>
-                      <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-white" />
+                      <CustomDatePicker value={endDate} onChange={setEndDate} placeholder="Date de fin" />
                     </div>
                   </div>
                 </div>
@@ -658,11 +659,11 @@ function CalendrierContent() {
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div className="space-y-1">
                     <Label className="text-xs">Date fixe</Label>
-                    <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className="bg-white" />
+                    <CustomDatePicker value={eventDate} onChange={setEventDate} placeholder="Date de l'événement" />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">Date de fin (optionnelle)</Label>
-                    <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-white" />
+                    <CustomDatePicker value={endDate} onChange={setEndDate} placeholder="Fin (optionnelle)" />
                   </div>
                 </div>
               )}
@@ -853,11 +854,11 @@ function CalendrierContent() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label className="text-xs text-slate-600">Début estimé</Label>
-                      <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className="bg-white" />
+                      <CustomDatePicker value={eventDate} onChange={setEventDate} placeholder="Date de début" />
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs text-slate-600">Fin estimée</Label>
-                      <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-white" />
+                      <CustomDatePicker value={endDate} onChange={setEndDate} placeholder="Date de fin" />
                     </div>
                   </div>
                 </div>
@@ -865,11 +866,11 @@ function CalendrierContent() {
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div className="space-y-1">
                     <Label className="text-xs">Date fixe</Label>
-                    <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} className="bg-white" />
+                    <CustomDatePicker value={eventDate} onChange={setEventDate} placeholder="Date de l'événement" />
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">Date de fin (optionnelle)</Label>
-                    <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-white" />
+                    <CustomDatePicker value={endDate} onChange={setEndDate} placeholder="Fin (optionnelle)" />
                   </div>
                 </div>
               )}

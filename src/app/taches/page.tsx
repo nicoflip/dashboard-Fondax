@@ -11,10 +11,61 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { CustomDatePicker } from '@/components/ui/date-picker'
 import { cn, TASK_CATEGORIES, TASK_STATUSES, TASK_PRIORITIES, PRIORITY_COLORS, STATUS_COLORS } from '@/lib/utils'
 import { Task, TaskCategory, TaskPriority, TaskStatus } from '@/lib/types'
-import { Plus, Trash2, CheckCircle2, Clock, Hourglass, Flame, Pencil, Calendar, Check, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, Clock, Hourglass, Flame, Pencil, Calendar, Check, AlertTriangle, Link2 } from 'lucide-react'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
+
+interface TaskDependency {
+  hasDependency: boolean
+  prereqTaskId: string
+  requiredStatus: TaskStatus
+  cleanDescription: string
+}
+
+function parseTaskDependency(desc?: string | null): TaskDependency {
+  if (!desc) {
+    return { hasDependency: false, prereqTaskId: '', requiredStatus: 'fait', cleanDescription: '' }
+  }
+  const match = desc.match(/^\[depends_on:([^:]+):([^\]]+)\]\s*\n?([\s\S]*)$/i)
+  if (match) {
+    return {
+      hasDependency: true,
+      prereqTaskId: match[1].trim(),
+      requiredStatus: (match[2].trim() as TaskStatus) || 'fait',
+      cleanDescription: match[3].trim()
+    }
+  }
+  return { hasDependency: false, prereqTaskId: '', requiredStatus: 'fait', cleanDescription: desc }
+}
+
+function formatTaskDescriptionWithDependency(
+  cleanDesc: string,
+  hasDependency: boolean,
+  prereqTaskId?: string,
+  requiredStatus?: string
+): string {
+  const base = (cleanDesc || '').trim()
+  if (!hasDependency || !prereqTaskId) {
+    return base
+  }
+  const status = requiredStatus || 'fait'
+  return `[depends_on:${prereqTaskId}:${status}]\n${base}`.trim()
+}
+
+function checkTaskBlocked(t: Task, allTasks: Task[]) {
+  const dep = parseTaskDependency(t.description)
+  if (!dep.hasDependency || !dep.prereqTaskId) {
+    return { isBlocked: false, dep, prereqTask: undefined }
+  }
+  const prereq = allTasks.find(item => item.id === dep.prereqTaskId)
+  if (!prereq) {
+    return { isBlocked: false, dep, prereqTask: undefined }
+  }
+  const isBlocked = prereq.status !== dep.requiredStatus
+  return { isBlocked, dep, prereqTask: prereq }
+}
 
 function TasksContent() {
   const supabase = createClient()
@@ -30,6 +81,7 @@ function TasksContent() {
   const [filterCat, setFilterCat] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterPriority, setFilterPriority] = useState('all')
+  const [hideBlocked, setHideBlocked] = useState(false)
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -39,12 +91,18 @@ function TasksContent() {
     category: TaskCategory
     priority: TaskPriority
     status: TaskStatus
+    hasDependency: boolean
+    prereqTaskId: string
+    requiredStatus: TaskStatus
   }>({
     title: '',
     description: '',
     category: TASK_CATEGORIES[0],
     priority: TASK_PRIORITIES[1],
-    status: TASK_STATUSES[0]
+    status: TASK_STATUSES[0],
+    hasDependency: false,
+    prereqTaskId: '',
+    requiredStatus: 'fait'
   })
 
   // Quick schedule to calendar state
@@ -104,6 +162,13 @@ function TasksContent() {
     if (filterCat !== 'all' && task.category !== filterCat) return false
     if (filterStatus !== 'all' && task.status !== filterStatus) return false
     if (filterPriority !== 'all' && task.priority !== filterPriority) return false
+
+    // Masquage optionnel des tâches en attente de prérequis non satisfait
+    if (hideBlocked && task.status !== 'fait') {
+      const { isBlocked } = checkTaskBlocked(task, tasks)
+      if (isBlocked) return false
+    }
+
     return true
   }).sort((a, b) => {
     // 1. Les tâches terminées ("fait") sont systématiquement reléguées TOUT EN BAS de la page
@@ -112,13 +177,21 @@ function TasksContent() {
     if (isDoneA && !isDoneB) return 1
     if (!isDoneA && isDoneB) return -1
 
-    // 2. Pour les tâches actives : tri par priorité (haute d'abord, puis moyenne, puis basse)
+    // 2. Si l'une des tâches actives est bloquée par un prérequis non satisfait, elle passe après les tâches prêtes
+    if (!isDoneA && !isDoneB) {
+      const blockedA = checkTaskBlocked(a, tasks).isBlocked
+      const blockedB = checkTaskBlocked(b, tasks).isBlocked
+      if (blockedA && !blockedB) return 1
+      if (!blockedA && blockedB) return -1
+    }
+
+    // 3. Pour les tâches actives prêtes : tri par priorité (haute d'abord, puis moyenne, puis basse)
     const prioOrder: Record<string, number> = { 'haute': 1, 'moyenne': 2, 'basse': 3 }
     const orderA = prioOrder[a.priority] || 99
     const orderB = prioOrder[b.priority] || 99
     if (orderA !== orderB) return orderA - orderB
 
-    // 3. À priorité égale : les plus récentes d'abord
+    // 4. À priorité égale : les plus récentes d'abord
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
 
@@ -137,9 +210,10 @@ function TasksContent() {
   }
 
   const openScheduleDialog = (task: Task) => {
+    const dep = parseTaskDependency(task.description)
     setTaskToSchedule(task)
     setSchedTitle(task.title)
-    setSchedNotes(task.description || '')
+    setSchedNotes(dep.cleanDescription || '')
     const defaultDate = new Date()
     defaultDate.setDate(defaultDate.getDate() + 1)
     setSchedDate(defaultDate.toISOString().split('T')[0])
@@ -201,25 +275,39 @@ function TasksContent() {
       description: '',
       category: TASK_CATEGORIES[0],
       priority: TASK_PRIORITIES[1],
-      status: TASK_STATUSES[0]
+      status: TASK_STATUSES[0],
+      hasDependency: false,
+      prereqTaskId: '',
+      requiredStatus: 'fait'
     })
     setIsDialogOpen(true)
   }
 
   const openEditTaskDialog = (task: Task) => {
+    const dep = parseTaskDependency(task.description)
     setEditingTask(task)
     setFormData({
       title: task.title,
-      description: task.description || '',
+      description: dep.cleanDescription,
       category: task.category,
       priority: task.priority,
-      status: task.status
+      status: task.status,
+      hasDependency: dep.hasDependency,
+      prereqTaskId: dep.prereqTaskId,
+      requiredStatus: dep.requiredStatus
     })
     setIsDialogOpen(true)
   }
 
   const handleSave = async () => {
     if (!formData.title) return
+
+    const finalDescription = formatTaskDescriptionWithDependency(
+      formData.description,
+      formData.hasDependency,
+      formData.prereqTaskId,
+      formData.requiredStatus
+    )
 
     if (editingTask) {
       const wasFait = editingTask.status === 'fait'
@@ -229,7 +317,7 @@ function TasksContent() {
         .from('tasks')
         .update({
           title: formData.title,
-          description: formData.description,
+          description: finalDescription,
           category: formData.category,
           priority: formData.priority,
           status: formData.status
@@ -251,7 +339,7 @@ function TasksContent() {
         .from('tasks')
         .insert([{
           title: formData.title,
-          description: formData.description,
+          description: finalDescription,
           category: formData.category,
           priority: formData.priority,
           status: formData.status
@@ -289,8 +377,13 @@ function TasksContent() {
     const isHighPrio = task.priority === 'haute'
     const isUrgent = isHighPrio && !isFait
 
-    // Styling fort pour les tâches urgentes afin qu'elles sautent immédiatement aux yeux
-    const borderClass = isUrgent 
+    // Check dependency status
+    const { isBlocked, dep, prereqTask } = checkTaskBlocked(task, tasks)
+
+    // Styling : si la tâche a un prérequis non satisfait, elle devient beaucoup moins visible
+    const borderClass = isBlocked
+      ? 'border-l-4 border-slate-300 border-dashed opacity-50 hover:opacity-85 transition-opacity'
+      : isUrgent 
       ? 'border-l-[6px] border-l-red-600 border-red-300 ring-2 ring-red-400/40 shadow-md shadow-red-100/70' 
       : isAttente 
       ? 'border-l-4 border-amber-500' 
@@ -300,7 +393,9 @@ function TasksContent() {
       ? 'border-l-4 border-blue-500' 
       : 'border-l-4 border-slate-300'
 
-    const bgClass = isUrgent 
+    const bgClass = isBlocked
+      ? 'bg-slate-50/70 shadow-2xs'
+      : isUrgent 
       ? 'bg-gradient-to-br from-red-50/70 via-white to-red-50/30' 
       : isAttente 
       ? 'bg-amber-50/40' 
@@ -310,8 +405,8 @@ function TasksContent() {
 
     return (
       <Card key={task.id} className={cn("flex flex-col transition-all relative overflow-hidden", borderClass, bgClass)}>
-        {/* Bandeau d'alerte URGENT en haut de la carte */}
-        {isUrgent && (
+        {/* Bandeau d'alerte URGENT en haut de la carte (seulement si non bloquée) */}
+        {isUrgent && !isBlocked && (
           <div className="bg-gradient-to-r from-red-600 via-red-600 to-rose-600 text-white px-3 py-1.5 text-xs font-black shadow-xs flex items-center justify-between">
             <span className="flex items-center gap-1.5">
               <Flame className="w-4 h-4 fill-amber-300 text-amber-300 animate-pulse shrink-0" />
@@ -323,16 +418,18 @@ function TasksContent() {
           </div>
         )}
 
-        <CardHeader className={cn("pb-3", isUrgent ? "pt-3" : "pt-4")}>
+        <CardHeader className={cn("pb-3", isUrgent && !isBlocked ? "pt-3" : "pt-4")}>
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 flex-1 min-w-0">
               {isFait && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
-              {isUrgent && <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-bounce" />}
+              {isUrgent && !isBlocked && <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-bounce" />}
+              {isBlocked && <Hourglass className="w-4 h-4 text-slate-400 shrink-0" />}
               <CardTitle 
                 className={cn(
                   "cursor-pointer text-lg hover:text-blue-600 hover:underline truncate",
-                  isUrgent && "font-black text-red-950",
-                  isFait && "line-through text-slate-400 font-normal"
+                  isUrgent && !isBlocked && "font-black text-red-950",
+                  isFait && "line-through text-slate-400 font-normal",
+                  isBlocked && "text-slate-600 font-medium"
                 )}
                 onClick={() => openEditTaskDialog(task)}
                 title={task.title}
@@ -371,6 +468,23 @@ function TasksContent() {
             </div>
           </div>
           
+          {/* Badges de statut ou de blocage par prérequis */}
+          {isBlocked && prereqTask && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50/90 text-amber-900 border border-amber-300 px-2.5 py-1 text-xs font-semibold w-fit shadow-2xs">
+              <Hourglass className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              <span>
+                ⏳ En attente de : <strong className="font-bold underline">{prereqTask.title}</strong> (statut requis : {dep.requiredStatus})
+              </span>
+            </div>
+          )}
+
+          {!isBlocked && dep.hasDependency && prereqTask && !isFait && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 text-xs font-medium w-fit">
+              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>✓ Prérequis validé : {prereqTask.title}</span>
+            </div>
+          )}
+
           {isAttente && (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 border border-amber-200 w-fit">
               <Hourglass className="w-3.5 h-3.5" />
@@ -385,14 +499,16 @@ function TasksContent() {
           )}
 
           <CardDescription className="line-clamp-2 mt-2">
-            {task.description ? (
-              isAttente ? 
-                <span className="text-amber-900 font-medium">{task.description}</span> 
+            {dep.cleanDescription ? (
+              isBlocked ?
+                <span className="text-slate-500 italic">{dep.cleanDescription}</span>
+                : isAttente ? 
+                <span className="text-amber-900 font-medium">{dep.cleanDescription}</span> 
                 : isUrgent ?
-                <span className="text-slate-800 font-medium">{task.description}</span>
+                <span className="text-slate-800 font-medium">{dep.cleanDescription}</span>
                 : isFait ?
-                <span className="text-slate-400 italic">{task.description}</span>
-                : task.description
+                <span className="text-slate-400 italic">{dep.cleanDescription}</span>
+                : dep.cleanDescription
             ) : <span className="italic text-slate-400">Aucune description</span>}
           </CardDescription>
         </CardHeader>
@@ -560,8 +676,29 @@ function TasksContent() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-slate-500">
-        <div>{filteredTasks.length} tâche(s) affichée(s)</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-3">
+          <span>{filteredTasks.length} tâche(s) affichée(s)</span>
+          {tasks.filter(t => t.status !== 'fait' && checkTaskBlocked(t, tasks).isBlocked).length > 0 && (
+            <button
+              type="button"
+              onClick={() => setHideBlocked(h => !h)}
+              className={cn(
+                "text-xs px-2.5 py-1 rounded-md border transition-all flex items-center gap-1.5 cursor-pointer",
+                hideBlocked 
+                  ? "bg-amber-100 text-amber-800 border-amber-300 font-semibold" 
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+              )}
+            >
+              <Hourglass className="w-3 h-3 text-amber-600" />
+              <span>
+                {hideBlocked 
+                  ? `Afficher les tâches bloquées (${tasks.filter(t => t.status !== 'fait' && checkTaskBlocked(t, tasks).isBlocked).length})` 
+                  : `Masquer les tâches bloquées (${tasks.filter(t => t.status !== 'fait' && checkTaskBlocked(t, tasks).isBlocked).length})`}
+              </span>
+            </button>
+          )}
+        </div>
         {activeTab === 'urgentes' && (
           <div className="flex items-center gap-1.5 text-xs font-bold text-red-600 bg-red-50 px-2.5 py-1 rounded-md border border-red-200">
             <Flame className="w-3.5 h-3.5 fill-red-500 text-red-600" />
@@ -674,6 +811,65 @@ function TasksContent() {
               {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+
+          {/* Dépendance conditionnelle (Prérequis) */}
+          <div className="rounded-xl border border-blue-200/80 bg-blue-50/40 p-3.5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Link2 className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-semibold text-slate-800">Dépendance (Prérequis)</span>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.hasDependency}
+                  onChange={e => setFormData({ ...formData, hasDependency: e.target.checked })}
+                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 h-4 w-4 cursor-pointer"
+                />
+                <span>Dépend d'une autre tâche</span>
+              </label>
+            </div>
+
+            {formData.hasDependency && (
+              <div className="space-y-3 pt-2 border-t border-blue-200/60">
+                <p className="text-xs text-slate-500">
+                  Cette tâche restera atténuée (moins visible) tant que la tâche prérequise n'a pas atteint le statut sélectionné ci-dessous.
+                </p>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-700">Tâche prérequise</Label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+                    value={formData.prereqTaskId}
+                    onChange={e => setFormData({ ...formData, prereqTaskId: e.target.value })}
+                  >
+                    <option value="">-- Choisir une tâche préalable --</option>
+                    {tasks
+                      .filter(t => !editingTask || t.id !== editingTask.id)
+                      .map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.title} (Statut : {t.status})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-slate-700">Statut requis pour débloquer</Label>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+                    value={formData.requiredStatus}
+                    onChange={e => setFormData({ ...formData, requiredStatus: e.target.value as TaskStatus })}
+                  >
+                    {TASK_STATUSES.map(s => (
+                      <option key={s} value={s}>
+                        {s === 'fait' ? '✓ fait (Recommandé)' : s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Annuler</Button>
@@ -706,10 +902,10 @@ function TasksContent() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Date de l'événement</Label>
-              <Input 
-                type="date" 
+              <CustomDatePicker 
                 value={schedDate} 
-                onChange={e => setSchedDate(e.target.value)} 
+                onChange={setSchedDate} 
+                placeholder="Date de l'échéance"
               />
             </div>
             <div className="space-y-2">
