@@ -268,13 +268,52 @@ const NetworkNode = React.memo(({ data, selected }: { data: any; selected?: bool
   const isDimmed = data.isDimmed
   const isHighlighted = data.isHighlighted
 
+  const ssidLow = (data.ssid || '').toLowerCase()
+  const notesLow = (data.notes || '').toLowerCase()
+  const roleLow = (data.role_status || '').toLowerCase()
+
+  let theme = {
+    border: 'border-purple-300 hover:border-purple-500 bg-gradient-to-br from-purple-50 via-white to-purple-50/40 text-purple-950',
+    badge: 'bg-purple-200 text-purple-800',
+    tag: 'Réseau',
+    icon: <Wifi className="w-4 h-4 text-purple-700" />
+  }
+
+  if (ssidLow.includes('sfr') || ssidLow.includes('fibre') || notesLow.includes('sfr')) {
+    theme = {
+      border: 'border-amber-400 hover:border-amber-600 bg-gradient-to-br from-amber-50 via-white to-amber-50/40 text-amber-950',
+      badge: 'bg-amber-200 text-amber-900 border border-amber-300',
+      tag: '⚠️ Box SFR (Parasite)',
+      icon: <Router className="w-4 h-4 text-amber-700" />
+    }
+  } else if (ssidLow.includes('client') || roleLow.includes('invité') || notesLow.includes('vlan')) {
+    theme = {
+      border: 'border-indigo-400 hover:border-indigo-600 bg-gradient-to-br from-indigo-50 via-white to-indigo-50/40 text-indigo-950',
+      badge: 'bg-indigo-200 text-indigo-900 border border-indigo-300',
+      tag: '🛡️ VLAN Invité Isolé',
+      icon: <Shield className="w-4 h-4 text-indigo-700" />
+    }
+  } else if (ssidLow.includes('fondax') || roleLow.includes('prod') || roleLow.includes('interne')) {
+    theme = {
+      border: 'border-emerald-400 hover:border-emerald-600 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 text-emerald-950',
+      badge: 'bg-emerald-200 text-emerald-900 border border-emerald-300',
+      tag: '🏢 LAN Prod & Wi-Fi',
+      icon: <Server className="w-4 h-4 text-emerald-700" />
+    }
+  } else if (ssidLow.includes('bureau') || notesLow.includes('deco') || notesLow.includes('mesh')) {
+    theme = {
+      border: 'border-violet-400 hover:border-violet-600 bg-gradient-to-br from-violet-50 via-white to-violet-50/40 text-violet-950',
+      badge: 'bg-violet-200 text-violet-900 border border-violet-300',
+      tag: '⚠️ Mesh Deco (Double NAT)',
+      icon: <Wifi className="w-4 h-4 text-violet-700" />
+    }
+  }
+
   return (
     <div
       className={cn(
-        "rounded-2xl border-2 border-dashed p-3.5 flex flex-col transition-all duration-200 relative select-none shadow-sm min-w-[210px]",
-        data.is_active !== false 
-          ? "border-purple-400/90 bg-gradient-to-br from-purple-50/90 via-white to-purple-50/40 text-purple-950" 
-          : "border-slate-300 bg-slate-50/90 text-slate-500 opacity-60",
+        "rounded-2xl border-2 border-dashed p-3 flex flex-col transition-all duration-200 relative select-none shadow-sm min-w-[210px] max-w-[240px]",
+        theme.border,
         selected && "ring-3 ring-purple-600 border-purple-600 shadow-md",
         isHighlighted && "ring-3 ring-purple-600 shadow-xl scale-105 z-30",
         isDimmed && "opacity-25 grayscale scale-95 pointer-events-none"
@@ -285,38 +324,35 @@ const NetworkNode = React.memo(({ data, selected }: { data: any; selected?: bool
 
       <div className="flex items-center justify-between gap-2 mb-1.5">
         <div className="flex items-center gap-1.5 min-w-0">
-          <div className="p-1 rounded-md bg-purple-100 text-purple-700 shrink-0">
-            <Wifi className="w-4 h-4" />
+          <div className="p-1 rounded-md bg-white/80 shrink-0">
+            {theme.icon}
           </div>
-          <span className="font-bold text-xs text-purple-950 truncate" title={data.ssid}>
+          <span className="font-bold text-xs truncate" title={data.ssid}>
             {data.ssid}
           </span>
         </div>
-        <span className={cn(
-          "text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full",
-          data.is_active !== false ? "bg-purple-200 text-purple-800" : "bg-slate-200 text-slate-600"
-        )}>
-          Réseau
+        <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap", theme.badge)}>
+          {theme.tag}
         </span>
       </div>
 
       <div className="space-y-1 my-1">
         {data.ip_range && (
           <div className="flex items-center justify-between text-[11px] font-mono bg-white/90 border border-purple-200/80 px-2 py-0.5 rounded">
-            <span className="text-purple-600 font-semibold">Plage :</span>
-            <span className="text-slate-800">{data.ip_range}</span>
+            <span className="text-slate-500 font-semibold">Plage :</span>
+            <span className="text-slate-900 font-bold">{data.ip_range}</span>
           </div>
         )}
         {data.gateway && (
           <div className="flex items-center justify-between text-[10px] font-mono text-slate-600 px-1">
             <span>Passerelle :</span>
-            <span className="font-semibold text-purple-900">{data.gateway}</span>
+            <span className="font-semibold text-slate-900">{data.gateway}</span>
           </div>
         )}
       </div>
 
       {data.role_status && (
-        <div className="text-[10px] text-slate-600 line-clamp-1 mt-0.5" title={data.role_status}>
+        <div className="text-[10px] text-slate-600 line-clamp-2 mt-0.5" title={data.role_status}>
           {data.role_status}
         </div>
       )}
@@ -389,32 +425,188 @@ const nodeTypes = {
   zone: ZoneNode,
 }
 
-const DEFAULT_ZONES: Node[] = [
-  {
-    id: 'zone-baie',
-    type: 'zone',
-    position: { x: 80, y: 0 },
-    style: { width: 750, height: 480 },
-    zIndex: -1,
-    data: {
-      label: 'Baie Réseau (Local Technique)',
-      description: 'Cœur de réseau, Firewall, Switch & NAS',
-      color: 'blue',
-    }
-  },
-  {
-    id: 'zone-bureau',
-    type: 'zone',
-    position: { x: 80, y: 560 },
-    style: { width: 750, height: 260 },
-    zIndex: -1,
-    data: {
-      label: 'Bureaux Administratifs & Études',
-      description: 'Postes encadrants & Wi-Fi Mesh',
-      color: 'amber',
-    }
+function computeOptimalLayout(
+  equipList: NetworkEquipment[],
+  networkList: Network[],
+  connList: NetworkConnection[],
+  showNetworks: boolean
+): { nodes: Node[]; edges: Edge[] } {
+  const nodes: Node[] = []
+  const edges: Edge[] = []
+
+  // 1. Core devices identification
+  const box = equipList.find(e => {
+    const n = (e.name || '').toLowerCase()
+    return n.includes('box') || n.includes('sfr') || n.includes('ont') || e.type === 'Modem/ONT'
+  })
+
+  const firewall = equipList.find(e => {
+    const n = (e.name || '').toLowerCase()
+    return (n.includes('sophos') || n.includes('firewall') || e.type === 'Firewall') && e.id !== box?.id
+  })
+
+  const mainSwitch = equipList.find(e => {
+    const n = (e.name || '').toLowerCase()
+    return (n.includes('switch') || n.includes('d-link') || e.type === 'Switch') && e.id !== firewall?.id
+  })
+
+  const nas = equipList.find(e => {
+    const n = (e.name || '').toLowerCase()
+    return e.type === 'NAS' || n.includes('synology') || n.includes('nas')
+  })
+
+  const voip = equipList.find(e => {
+    const n = (e.name || '').toLowerCase()
+    return e.type === 'VoIP' || n.includes('voip') || n.includes('yealink')
+  })
+
+  const deco1 = equipList.find(e => {
+    const n = (e.name || '').toLowerCase()
+    return n.includes('deco 1') || (n.includes('deco') && !n.includes('deco 2'))
+  })
+
+  const deco2 = equipList.find(e => {
+    const n = (e.name || '').toLowerCase()
+    return n.includes('deco 2') && e.id !== deco1?.id
+  })
+
+  const handledIds = new Set<string>()
+  if (box) handledIds.add(box.id)
+  if (firewall) handledIds.add(firewall.id)
+  if (mainSwitch) handledIds.add(mainSwitch.id)
+  if (nas) handledIds.add(nas.id)
+  if (voip) handledIds.add(voip.id)
+  if (deco1) handledIds.add(deco1.id)
+  if (deco2) handledIds.add(deco2.id)
+
+  const otherEquip = equipList.filter(e => !handledIds.has(e.id))
+
+  // 2. Central backbone coordinates (Centered on X = 520)
+  const centerX = 520
+  const positions: Record<string, { x: number; y: number }> = {}
+
+  if (box) positions[box.id] = { x: centerX, y: 60 }
+  if (firewall) positions[firewall.id] = { x: centerX, y: 230 }
+  if (mainSwitch) positions[mainSwitch.id] = { x: centerX, y: 400 }
+
+  if (nas) positions[nas.id] = { x: 140, y: 580 }
+  if (voip) positions[voip.id] = { x: centerX, y: 580 }
+  if (deco1) positions[deco1.id] = { x: 900, y: 580 }
+  if (deco2) positions[deco2.id] = { x: 900, y: 760 }
+
+  // Other endpoints (Workstations, Printers, IoT) avoiding Deco 2 at (900, 760)
+  const endpointCols = [140, 390, 640]
+  otherEquip.forEach((eq, idx) => {
+    const row = Math.floor(idx / endpointCols.length)
+    const col = idx % endpointCols.length
+    const yPos = 760 + row * 170
+    positions[eq.id] = { x: endpointCols[col], y: yPos }
+  })
+
+  // 3. Add equipment nodes
+  equipList.forEach(eq => {
+    const pos = positions[eq.id] || { x: eq.position_x || 200, y: eq.position_y || 200 }
+    nodes.push({
+      id: eq.id,
+      type: 'equipment',
+      position: pos,
+      data: { ...eq, isHighlighted: false, isDimmed: false } as Record<string, unknown>,
+      zIndex: 10
+    })
+  })
+
+  // 4. Add equipment connections
+  connList.forEach((conn: NetworkConnection) => {
+    const connType = parseEdgeType(conn.notes, conn.label)
+    const visual = getEdgeVisual(connType)
+    edges.push({
+      id: conn.id,
+      source: conn.source_id,
+      target: conn.target_id,
+      label: conn.label || undefined,
+      type: 'smoothstep',
+      animated: connType === 'wifi' || connType === 'fibre' || true,
+      style: visual,
+      markerEnd: { type: MarkerType.ArrowClosed, color: visual.stroke },
+      data: { ...conn, connection_type: connType }
+    })
+  })
+
+  // 5. Subnet network nodes placed laterally beside their true host (zero overlap)
+  if (showNetworks) {
+    networkList.forEach((net, idx) => {
+      const netNodeId = `net-${net.id}`
+      const ssidLow = (net.ssid || '').toLowerCase()
+      const notesLow = (net.notes || '').toLowerCase()
+      const roleLow = (net.role_status || '').toLowerCase()
+
+      let netPos = { x: 1240, y: 60 + idx * 170 }
+      let targetHostId: string | undefined = undefined
+      let edgeLabel = net.ip_range ? `${net.ip_range}` : undefined
+
+      if (ssidLow.includes('sfr') || ssidLow.includes('fibre') || notesLow.includes('sfr')) {
+        // 1. WAN Wi-Fi Box SFR -> placed to the right of Box SFR
+        if (box) {
+          netPos = { x: 900, y: 60 }
+          targetHostId = box.id
+          edgeLabel = 'Wi-Fi Box (192.168.0.0/24)'
+        }
+      } else if (ssidLow.includes('client') || roleLow.includes('invité') || notesLow.includes('vlan')) {
+        // 2. VLAN Invité Sophos -> placed to the right of Sophos
+        if (firewall) {
+          netPos = { x: 900, y: 230 }
+          targetHostId = firewall.id
+          edgeLabel = 'VLAN Invités (10.35.50.0/24)'
+        }
+      } else if (ssidLow.includes('fondax') || roleLow.includes('prod') || roleLow.includes('interne')) {
+        // 3. LAN Prod & Wi-Fi Entreprise -> placed to the left of Switch
+        if (mainSwitch) {
+          netPos = { x: 140, y: 400 }
+          targetHostId = mainSwitch.id
+          edgeLabel = 'LAN Prod (192.168.20.0/24)'
+        } else if (firewall) {
+          netPos = { x: 140, y: 230 }
+          targetHostId = firewall.id
+          edgeLabel = 'Passerelle LAN (192.168.20.254)'
+        }
+      } else if (ssidLow.includes('bureau') || roleLow.includes('mesh') || notesLow.includes('deco')) {
+        // 4. TP-Link Deco Mesh Network -> placed to the right of Deco 1
+        if (deco1) {
+          netPos = { x: 1240, y: 580 }
+          targetHostId = deco1.id
+          edgeLabel = 'Mesh Deco (192.168.68.0/24)'
+        }
+      } else {
+        netPos = { x: 1240, y: 60 + idx * 170 }
+        targetHostId = firewall?.id || mainSwitch?.id
+      }
+
+      nodes.push({
+        id: netNodeId,
+        type: 'network',
+        position: netPos,
+        data: { ...net, isHighlighted: false, isDimmed: false } as Record<string, unknown>,
+        zIndex: 8
+      })
+
+      if (targetHostId) {
+        edges.push({
+          id: `edge-net-${net.id}`,
+          source: targetHostId,
+          target: netNodeId,
+          label: edgeLabel,
+          type: 'smoothstep',
+          animated: true,
+          style: getEdgeVisual('subnet'),
+          markerEnd: { type: MarkerType.ArrowClosed, color: '#a855f7' },
+          data: { isNetworkEdge: true }
+        })
+      }
+    })
   }
-]
+
+  return { nodes, edges }
+}
 
 function ReseauContent() {
   const supabase = createClient()
@@ -511,166 +703,57 @@ function ReseauContent() {
     setNetworks(netData)
     setLanDevices(lanData)
 
-    const initialNodes: Node[] = DEFAULT_ZONES.map(z => ({
-      ...z,
-      data: {
-        ...z.data,
-        onDelete: handleDeleteZone
-      }
-    }))
-
-    // Add Equipment Nodes
-    equipData.forEach((eq: NetworkEquipment, idx) => {
-      initialNodes.push({
-        id: eq.id,
-        type: 'equipment',
-        position: { x: eq.position_x || 150 + (idx % 3) * 230, y: eq.position_y || 80 + Math.floor(idx / 3) * 150 },
-        data: { ...eq, isHighlighted: false, isDimmed: false } as Record<string, unknown>,
-        zIndex: 10
-      })
-    })
-
-    // Add Network Subnet Nodes
-    if (showNetworksOnMap) {
-      netData.forEach((net, idx) => {
-        initialNodes.push({
-          id: `net-${net.id}`,
-          type: 'network',
-          position: { x: 860, y: 80 + idx * 140 },
-          data: { ...net, isHighlighted: false, isDimmed: false } as Record<string, unknown>,
-          zIndex: 8
-        })
-      })
-    }
+    // Build guaranteed clean non-overlapping topology
+    const { nodes: initialNodes, edges: initialEdges } = computeOptimalLayout(
+      equipData, 
+      netData, 
+      connData, 
+      showNetworksOnMap
+    )
 
     setNodes(initialNodes)
-
-    // Build Edges
-    const initialEdges: Edge[] = connData.map((conn: NetworkConnection) => {
-      const connType = parseEdgeType(conn.notes, conn.label)
-      const visual = getEdgeVisual(connType)
-
-      return {
-        id: conn.id,
-        source: conn.source_id,
-        target: conn.target_id,
-        label: conn.label || undefined,
-        type: 'smoothstep',
-        animated: connType === 'wifi' || connType === 'fibre' || true,
-        style: visual,
-        markerEnd: { type: MarkerType.ArrowClosed, color: visual.stroke },
-        data: { ...conn, connection_type: connType }
-      }
-    })
-
-    // Connect Network Nodes visually to their Gateway / Firewall
-    if (showNetworksOnMap) {
-      netData.forEach(net => {
-        if (!net.gateway) return
-        const gatewayEquip = equipData.find(e => e.ip === net.gateway) || 
-                             equipData.find(e => (e.name.toLowerCase().includes('sophos') || e.type === 'Firewall'))
-        if (gatewayEquip) {
-          initialEdges.push({
-            id: `edge-net-${net.id}`,
-            source: gatewayEquip.id,
-            target: `net-${net.id}`,
-            label: net.ip_range ? `${net.ip_range}` : undefined,
-            type: 'smoothstep',
-            animated: true,
-            style: getEdgeVisual('subnet'),
-            markerEnd: { type: MarkerType.ArrowClosed, color: '#a855f7' },
-            data: { isNetworkEdge: true }
-          })
-        }
-      })
-    }
-
     setEdges(initialEdges)
     setLoading(false)
+
+    setTimeout(() => {
+      fitView({ duration: 500, padding: 0.15 })
+    }, 200)
   }
 
-  // Auto-Layout Algorithm
+  // Auto-Layout Algorithm (Triggered by button)
   const handleAutoLayout = async () => {
     if (equipments.length === 0) return
 
-    const tierModem: NetworkEquipment[] = []
-    const tierFirewall: NetworkEquipment[] = []
-    const tierSwitch: NetworkEquipment[] = []
-    const tierCore: NetworkEquipment[] = []
-    const tierEndpoints: NetworkEquipment[] = []
+    const { nodes: newNodes, edges: newEdges } = computeOptimalLayout(
+      equipments,
+      networks,
+      edges.filter(e => !e.data?.isNetworkEdge).map(e => ({
+        id: e.id,
+        source_id: e.source,
+        target_id: e.target,
+        label: e.label ? String(e.label) : null,
+        notes: e.data?.notes ? String(e.data.notes) : null,
+        created_at: ''
+      })),
+      showNetworksOnMap
+    )
 
-    equipments.forEach(eq => {
-      const type = eq.type || ''
-      const name = (eq.name || '').toLowerCase()
-      if (type === 'Modem/ONT' || name.includes('box') || name.includes('sfr') || name.includes('ont')) {
-        tierModem.push(eq)
-      } else if (type === 'Firewall' || name.includes('sophos') || name.includes('firewall')) {
-        tierFirewall.push(eq)
-      } else if (type === 'Switch' || name.includes('switch') || name.includes('d-link')) {
-        tierSwitch.push(eq)
-      } else if (['NAS', 'VoIP', "Point d'accès", 'Serveur'].includes(type) || name.includes('deco') || name.includes('nas')) {
-        tierCore.push(eq)
-      } else {
-        tierEndpoints.push(eq)
-      }
-    })
-
-    const newPositions: Record<string, { x: number; y: number }> = {}
-    const centerX = 380
-
-    tierModem.forEach((eq, idx) => {
-      const total = tierModem.length
-      const startX = centerX - ((total - 1) * 260) / 2
-      newPositions[eq.id] = { x: Math.round(startX + idx * 260), y: 50 }
-    })
-
-    tierFirewall.forEach((eq, idx) => {
-      const total = tierFirewall.length
-      const startX = centerX - ((total - 1) * 260) / 2
-      newPositions[eq.id] = { x: Math.round(startX + idx * 260), y: 190 }
-    })
-
-    tierSwitch.forEach((eq, idx) => {
-      const total = tierSwitch.length
-      const startX = centerX - ((total - 1) * 260) / 2
-      newPositions[eq.id] = { x: Math.round(startX + idx * 260), y: 330 }
-    })
-
-    tierCore.forEach((eq, idx) => {
-      const total = tierCore.length
-      const startX = centerX - ((total - 1) * 250) / 2
-      newPositions[eq.id] = { x: Math.round(startX + idx * 250), y: 490 }
-    })
-
-    tierEndpoints.forEach((eq, idx) => {
-      const total = tierEndpoints.length
-      const startX = centerX - ((total - 1) * 230) / 2
-      newPositions[eq.id] = { x: Math.round(startX + idx * 230), y: 650 }
-    })
-
-    if (showNetworksOnMap) {
-      networks.forEach((net, idx) => {
-        newPositions[`net-${net.id}`] = { x: 860, y: 100 + idx * 140 }
-      })
-    }
-
-    // Apply positions to local nodes
-    setNodes(nds => nds.map(n => {
-      const pos = newPositions[n.id]
-      if (pos) return { ...n, position: pos }
-      return n
-    }))
+    setNodes(newNodes)
+    setEdges(newEdges)
 
     // Persist new positions to Supabase
-    const updatePromises = Object.entries(newPositions)
-      .filter(([id]) => !id.startsWith('net-') && !id.startsWith('zone-'))
-      .map(([id, pos]) => 
-        supabase.from('network_equipment').update({ position_x: pos.x, position_y: pos.y }).eq('id', id)
+    const updatePromises = newNodes
+      .filter(n => n.type === 'equipment')
+      .map(n => 
+        supabase.from('network_equipment').update({ 
+          position_x: Math.round(n.position.x), 
+          position_y: Math.round(n.position.y) 
+        }).eq('id', n.id)
       )
 
     await Promise.all(updatePromises)
 
-    showToast('✨ Topologie réorganisée avec succès !')
+    showToast('✨ Topologie réorganisée avec succès : vue claire et aérée !')
     setTimeout(() => {
       fitView({ duration: 500, padding: 0.15 })
     }, 150)
@@ -881,20 +964,23 @@ function ReseauContent() {
   const handleAddEquipment = async () => {
     if (!newEquip.name) return
 
-    let posX = 380
-    let posY = 450
+    let posX = 520
+    let posY = 760
 
     if (newEquip.autoConnectId) {
       const parentNode = nodes.find(n => n.id === newEquip.autoConnectId)
       if (parentNode) {
         const siblingCount = edges.filter(e => e.source === newEquip.autoConnectId || e.target === newEquip.autoConnectId).length
-        const offset = (siblingCount % 2 === 0 ? 1 : -1) * (Math.floor(siblingCount / 2) + 1) * 200
+        const offset = (siblingCount % 2 === 0 ? 1 : -1) * (Math.floor(siblingCount / 2) + 1) * 260
         posX = parentNode.position.x + offset
-        posY = parentNode.position.y + 160
+        posY = parentNode.position.y + 170
       }
     } else {
-      posX = 150 + (equipments.length % 4) * 230
-      posY = 350 + Math.floor(equipments.length / 4) * 150
+      const endpointNodes = nodes.filter(n => n.type === 'equipment' && n.position.y >= 760)
+      const col = endpointNodes.length % 3
+      const row = Math.floor(endpointNodes.length / 3)
+      posX = 140 + col * 250
+      posY = 760 + row * 170
     }
 
     const { data, error } = await supabase.from('network_equipment').insert({
@@ -1025,24 +1111,27 @@ function ReseauContent() {
       // Auto add network bubble on topology if checked
       if (networkForm.addToTopology !== false) {
         const netNodeId = `net-${data.id}`
+        const targetEquip = networkForm.connectToEquipId 
+          ? equipments.find(e => e.id === networkForm.connectToEquipId)
+          : equipments.find(e => e.ip === data.gateway) ||
+            equipments.find(e => e.type === 'Firewall' || e.name.toLowerCase().includes('sophos'))
+
+        const posX = targetEquip ? (targetEquip.position_x || 520) + 380 : 1240
+        const posY = targetEquip ? (targetEquip.position_y || 230) : 60 + networks.length * 170
+
         const netNode: Node = {
           id: netNodeId,
           type: 'network',
-          position: { x: 860, y: 100 + networks.length * 140 },
+          position: { x: posX, y: posY },
           data: { ...data, isHighlighted: false, isDimmed: false } as Record<string, unknown>,
           zIndex: 8
         }
         setNodes(nds => [...nds, netNode])
 
-        // Connect to chosen gateway equipment
-        const targetEquipId = networkForm.connectToEquipId || 
-                              equipments.find(e => e.ip === data.gateway)?.id ||
-                              equipments.find(e => e.type === 'Firewall' || e.name.toLowerCase().includes('sophos'))?.id
-
-        if (targetEquipId) {
+        if (targetEquip) {
           const netEdge: Edge = {
             id: `edge-net-${data.id}`,
-            source: targetEquipId,
+            source: targetEquip.id,
             target: netNodeId,
             label: data.ip_range ? `${data.ip_range}` : undefined,
             type: 'smoothstep',
@@ -1149,8 +1238,11 @@ function ReseauContent() {
     else if (roleLow.includes('nas') || hostLow.includes('nas')) devType = 'NAS'
     else if (roleLow.includes('iot') || roleLow.includes('espressif')) devType = 'Autre'
 
-    const posX = parentSwitch ? parentSwitch.position_x + (Math.random() * 200 - 100) : 380
-    const posY = parentSwitch ? parentSwitch.position_y + 180 : 640
+    const endpointNodes = nodes.filter(n => n.type === 'equipment' && n.position.y >= 760)
+    const col = endpointNodes.length % 3
+    const row = Math.floor(endpointNodes.length / 3)
+    const posX = 140 + col * 250
+    const posY = 760 + row * 170
 
     const { data: newEq } = await supabase.from('network_equipment').insert({
       name: devName,
