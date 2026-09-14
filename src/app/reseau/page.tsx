@@ -29,7 +29,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from '
 import { Badge } from '@/components/ui/badge'
 import { 
   Plus, Router, Shield, Server, HardDrive, Phone, Wifi, Monitor, Printer, Box, Trash2,
-  X, Layers, Filter, CheckCircle2, ArrowRight
+  X, Layers, Filter, CheckCircle2, ArrowRight, Pencil
 } from 'lucide-react'
 import { NetworkEquipment, NetworkConnection, Network, LanDevice } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -216,6 +216,22 @@ export default function ReseauPage() {
   // Network and LAN state
   const [networks, setNetworks] = useState<Network[]>([])
   const [lanDevices, setLanDevices] = useState<LanDevice[]>([])
+
+  // Network modals state
+  const [isAddNetworkModalOpen, setIsAddNetworkModalOpen] = useState(false)
+  const [isEditNetworkModalOpen, setIsEditNetworkModalOpen] = useState(false)
+  const [networkForm, setNetworkForm] = useState<Partial<Network>>({
+    ssid: '', ip_range: '', gateway: '', manager: '', role_status: '', notes: '', is_active: true
+  })
+  const [editingNetworkId, setEditingNetworkId] = useState<string | null>(null)
+
+  // LAN Device modals state
+  const [isAddLanModalOpen, setIsAddLanModalOpen] = useState(false)
+  const [isEditLanModalOpen, setIsEditLanModalOpen] = useState(false)
+  const [lanForm, setLanForm] = useState<Partial<LanDevice>>({
+    hostname: '', ip: '', role: '', network_id: null
+  })
+  const [editingLanId, setEditingLanId] = useState<string | null>(null)
 
   // Network isolation mode
   const [isolatedNetworkId, setIsolatedNetworkId] = useState<string | null>(null)
@@ -514,6 +530,118 @@ export default function ReseauPage() {
     setNewZone({ label: '', description: '', color: 'blue', width: 350, height: 250 })
   }
 
+  // Network CRUD handlers
+  const handleAddNetwork = async () => {
+    if (!networkForm.ssid) return
+    const { data, error } = await supabase.from('networks').insert([{
+      ssid: networkForm.ssid,
+      ip_range: networkForm.ip_range || null,
+      gateway: networkForm.gateway || null,
+      manager: networkForm.manager || null,
+      role_status: networkForm.role_status || null,
+      notes: networkForm.notes || null,
+      is_active: networkForm.is_active ?? true
+    }]).select().single()
+
+    if (!error && data) {
+      setNetworks([data, ...networks])
+      setIsAddNetworkModalOpen(false)
+      setNetworkForm({ ssid: '', ip_range: '', gateway: '', manager: '', role_status: '', notes: '', is_active: true })
+    }
+  }
+
+  const openEditNetwork = (net: Network) => {
+    setEditingNetworkId(net.id)
+    setNetworkForm({
+      ssid: net.ssid || '',
+      ip_range: net.ip_range || '',
+      gateway: net.gateway || '',
+      manager: net.manager || '',
+      role_status: net.role_status || '',
+      notes: net.notes || '',
+      is_active: net.is_active ?? true
+    })
+    setIsEditNetworkModalOpen(true)
+  }
+
+  const handleUpdateNetwork = async () => {
+    if (!editingNetworkId) return
+    const { error } = await supabase.from('networks').update({
+      ssid: networkForm.ssid,
+      ip_range: networkForm.ip_range || null,
+      gateway: networkForm.gateway || null,
+      manager: networkForm.manager || null,
+      role_status: networkForm.role_status || null,
+      notes: networkForm.notes || null,
+      is_active: networkForm.is_active ?? true
+    }).eq('id', editingNetworkId)
+
+    if (!error) {
+      setNetworks(networks.map(n => n.id === editingNetworkId ? { ...n, ...networkForm } as Network : n))
+      setIsEditNetworkModalOpen(false)
+    }
+  }
+
+  const handleDeleteNetwork = async (id: string, ssid: string | null) => {
+    if (!window.confirm(`Supprimer définitivement le réseau "${ssid || 'Sans nom'}" ?`)) return
+    const { error } = await supabase.from('networks').delete().eq('id', id)
+    if (!error) {
+      setNetworks(networks.filter(n => n.id !== id))
+      if (isolatedNetworkId === id) setIsolatedNetworkId(null)
+    }
+  }
+
+  // LAN Device CRUD handlers
+  const handleAddLanDevice = async () => {
+    if (!lanForm.ip) return
+    const { data, error } = await supabase.from('lan_devices').insert([{
+      hostname: lanForm.hostname || null,
+      ip: lanForm.ip,
+      role: lanForm.role || null,
+      network_id: lanForm.network_id || null
+    }]).select().single()
+
+    if (!error && data) {
+      setLanDevices([data, ...lanDevices])
+      setIsAddLanModalOpen(false)
+      setLanForm({ hostname: '', ip: '', role: '', network_id: null })
+    }
+  }
+
+  const openEditLanDevice = (dev: LanDevice) => {
+    setEditingLanId(dev.id)
+    setLanForm({
+      hostname: dev.hostname || '',
+      ip: dev.ip || '',
+      role: dev.role || '',
+      network_id: dev.network_id || null
+    })
+    setIsEditLanModalOpen(true)
+  }
+
+  const handleUpdateLanDevice = async () => {
+    if (!editingLanId) return
+    const { error } = await supabase.from('lan_devices').update({
+      hostname: lanForm.hostname || null,
+      ip: lanForm.ip,
+      role: lanForm.role || null,
+      network_id: lanForm.network_id || null
+    }).eq('id', editingLanId)
+
+    if (!error) {
+      setLanDevices(lanDevices.map(d => d.id === editingLanId ? { ...d, ...lanForm } as LanDevice : d))
+      setIsEditLanModalOpen(false)
+    }
+  }
+
+  const handleDeleteLanDevice = async (id: string, name: string | null) => {
+    if (!window.confirm(`Supprimer l'appareil "${name || 'cet appareil'}" du réseau LAN ?`)) return
+    const { error } = await supabase.from('lan_devices').delete().eq('id', id)
+    if (!error) {
+      setLanDevices(lanDevices.filter(d => d.id !== id))
+    }
+  }
+
   if (loading) return <div className="p-8 text-center text-slate-500">Chargement du plan réseau...</div>
 
   if (!mounted) {
@@ -736,6 +864,17 @@ export default function ReseauPage() {
               <CardTitle className="text-xl">Réseaux identifiés</CardTitle>
               <p className="text-xs text-slate-500 mt-1">Cliquez sur un réseau pour l'isoler sur le schéma</p>
             </div>
+            <Button 
+              size="sm" 
+              onClick={() => {
+                setNetworkForm({ ssid: '', ip_range: '', gateway: '', manager: '', role_status: '', notes: '', is_active: true })
+                setIsAddNetworkModalOpen(true)
+              }} 
+              className="gap-1 text-xs cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Ajouter un réseau
+            </Button>
           </CardHeader>
           <CardContent>
             <div className="divide-y border rounded-xl overflow-hidden">
@@ -766,7 +905,27 @@ export default function ReseauPage() {
                       <p className="text-xs text-slate-600">{net.role_status}</p>
                       {net.notes && <p className="text-xs text-amber-700 font-medium">{net.notes}</p>}
                     </div>
-                    <Badge variant="outline" className="shrink-0">{net.manager}</Badge>
+                    <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                      <Badge variant="outline">{net.manager || 'N/A'}</Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Modifier ce réseau"
+                        onClick={() => openEditNetwork(net)}
+                        className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Supprimer ce réseau"
+                        onClick={() => handleDeleteNetwork(net.id, net.ssid)}
+                        className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 )
               })}
@@ -783,7 +942,20 @@ export default function ReseauPage() {
                 {activeIsolatedNetwork ? `Filtré sur ${activeIsolatedNetwork.ssid}` : 'Inventaire complet du réseau'}
               </p>
             </div>
-            <Badge variant="secondary">{displayedLanDevices.length} appareil(s)</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">{displayedLanDevices.length} appareil(s)</Badge>
+              <Button 
+                size="sm" 
+                onClick={() => {
+                  setLanForm({ hostname: '', ip: '', role: '', network_id: isolatedNetworkId || null })
+                  setIsAddLanModalOpen(true)
+                }} 
+                className="gap-1 text-xs cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Ajouter
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="divide-y border rounded-xl overflow-hidden max-h-[420px] overflow-y-auto">
@@ -795,10 +967,30 @@ export default function ReseauPage() {
                 displayedLanDevices.map(dev => (
                   <div key={dev.id} className="p-3 flex items-center justify-between hover:bg-slate-50 text-sm">
                     <div>
-                      <div className="font-semibold text-slate-800">{dev.hostname}</div>
-                      <div className="text-xs text-slate-500">{dev.role}</div>
+                      <div className="font-semibold text-slate-800">{dev.hostname || 'Sans nom'}</div>
+                      <div className="text-xs text-slate-500">{dev.role || 'Aucun rôle spécifié'}</div>
                     </div>
-                    <Badge variant="secondary" className="font-mono text-xs">{dev.ip}</Badge>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant="secondary" className="font-mono text-xs">{dev.ip}</Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Modifier cet appareil"
+                        onClick={() => openEditLanDevice(dev)}
+                        className="h-7 w-7 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Supprimer cet appareil"
+                        onClick={() => handleDeleteLanDevice(dev.id, dev.hostname)}
+                        className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 ))
               )}
@@ -971,6 +1163,229 @@ export default function ReseauPage() {
         <DialogFooter>
           <Button variant="outline" onClick={() => setIsAddZoneModalOpen(false)}>Annuler</Button>
           <Button onClick={handleAddZone} disabled={!newZone.label}>Créer la zone</Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Dialog: Ajouter un réseau */}
+      <Dialog open={isAddNetworkModalOpen} onClose={() => setIsAddNetworkModalOpen(false)}>
+        <DialogHeader>
+          <DialogTitle>Ajouter un réseau</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Nom du réseau / SSID <span className="text-red-500">*</span></Label>
+            <Input 
+              placeholder="ex: fondax prod wifi, VLAN Atelier..."
+              value={networkForm.ssid || ''} 
+              onChange={e => setNetworkForm({...networkForm, ssid: e.target.value})} 
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Plage IP / Sous-réseau</Label>
+              <Input 
+                placeholder="ex: 192.168.20.0/24"
+                value={networkForm.ip_range || ''} 
+                onChange={e => setNetworkForm({...networkForm, ip_range: e.target.value})} 
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Passerelle par défaut</Label>
+              <Input 
+                placeholder="ex: 192.168.20.254"
+                value={networkForm.gateway || ''} 
+                onChange={e => setNetworkForm({...networkForm, gateway: e.target.value})} 
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Responsable / Gestionnaire</Label>
+            <Input 
+              placeholder="ex: Sophos / AP interne, Box SFR..."
+              value={networkForm.manager || ''} 
+              onChange={e => setNetworkForm({...networkForm, manager: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Rôle & Statut</Label>
+            <Input 
+              placeholder="ex: Wi-Fi interne de production - Actif"
+              value={networkForm.role_status || ''} 
+              onChange={e => setNetworkForm({...networkForm, role_status: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Notes & Remarques</Label>
+            <Textarea 
+              placeholder="Spécificités, actions en cours..."
+              value={networkForm.notes || ''} 
+              onChange={e => setNetworkForm({...networkForm, notes: e.target.value})} 
+              rows={3} 
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsAddNetworkModalOpen(false)}>Annuler</Button>
+          <Button onClick={handleAddNetwork} disabled={!networkForm.ssid}>Ajouter le réseau</Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Dialog: Modifier un réseau */}
+      <Dialog open={isEditNetworkModalOpen} onClose={() => setIsEditNetworkModalOpen(false)}>
+        <DialogHeader>
+          <DialogTitle>Modifier le réseau</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Nom du réseau / SSID <span className="text-red-500">*</span></Label>
+            <Input 
+              value={networkForm.ssid || ''} 
+              onChange={e => setNetworkForm({...networkForm, ssid: e.target.value})} 
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Plage IP / Sous-réseau</Label>
+              <Input 
+                value={networkForm.ip_range || ''} 
+                onChange={e => setNetworkForm({...networkForm, ip_range: e.target.value})} 
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Passerelle par défaut</Label>
+              <Input 
+                value={networkForm.gateway || ''} 
+                onChange={e => setNetworkForm({...networkForm, gateway: e.target.value})} 
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Responsable / Gestionnaire</Label>
+            <Input 
+              value={networkForm.manager || ''} 
+              onChange={e => setNetworkForm({...networkForm, manager: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Rôle & Statut</Label>
+            <Input 
+              value={networkForm.role_status || ''} 
+              onChange={e => setNetworkForm({...networkForm, role_status: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Notes & Remarques</Label>
+            <Textarea 
+              value={networkForm.notes || ''} 
+              onChange={e => setNetworkForm({...networkForm, notes: e.target.value})} 
+              rows={3} 
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsEditNetworkModalOpen(false)}>Annuler</Button>
+          <Button onClick={handleUpdateNetwork} disabled={!networkForm.ssid}>Enregistrer les modifications</Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Dialog: Ajouter un appareil LAN */}
+      <Dialog open={isAddLanModalOpen} onClose={() => setIsAddLanModalOpen(false)}>
+        <DialogHeader>
+          <DialogTitle>Ajouter un appareil LAN</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Adresse IP <span className="text-red-500">*</span></Label>
+            <Input 
+              placeholder="ex: 192.168.20.155"
+              value={lanForm.ip || ''} 
+              onChange={e => setLanForm({...lanForm, ip: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Nom d'hôte (Hostname)</Label>
+            <Input 
+              placeholder="ex: PC-ATELIER-1, IMPRIMANTE-EXP"
+              value={lanForm.hostname || ''} 
+              onChange={e => setLanForm({...lanForm, hostname: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Rôle / Description</Label>
+            <Input 
+              placeholder="ex: Tablette Altior Expédition"
+              value={lanForm.role || ''} 
+              onChange={e => setLanForm({...lanForm, role: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Réseau rattaché</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+              value={lanForm.network_id || ''}
+              onChange={e => setLanForm({...lanForm, network_id: e.target.value || null})}
+            >
+              <option value="">-- Réseau par défaut / non spécifié --</option>
+              {networks.map(n => (
+                <option key={n.id} value={n.id}>
+                  {n.ssid} ({n.ip_range})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsAddLanModalOpen(false)}>Annuler</Button>
+          <Button onClick={handleAddLanDevice} disabled={!lanForm.ip}>Ajouter l'appareil</Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Dialog: Modifier un appareil LAN */}
+      <Dialog open={isEditLanModalOpen} onClose={() => setIsEditLanModalOpen(false)}>
+        <DialogHeader>
+          <DialogTitle>Modifier l'appareil LAN</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Adresse IP <span className="text-red-500">*</span></Label>
+            <Input 
+              value={lanForm.ip || ''} 
+              onChange={e => setLanForm({...lanForm, ip: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Nom d'hôte (Hostname)</Label>
+            <Input 
+              value={lanForm.hostname || ''} 
+              onChange={e => setLanForm({...lanForm, hostname: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Rôle / Description</Label>
+            <Input 
+              value={lanForm.role || ''} 
+              onChange={e => setLanForm({...lanForm, role: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Réseau rattaché</Label>
+            <select
+              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+              value={lanForm.network_id || ''}
+              onChange={e => setLanForm({...lanForm, network_id: e.target.value || null})}
+            >
+              <option value="">-- Réseau par défaut / non spécifié --</option>
+              {networks.map(n => (
+                <option key={n.id} value={n.id}>
+                  {n.ssid} ({n.ip_range})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsEditLanModalOpen(false)}>Annuler</Button>
+          <Button onClick={handleUpdateLanDevice} disabled={!lanForm.ip}>Enregistrer</Button>
         </DialogFooter>
       </Dialog>
     </div>

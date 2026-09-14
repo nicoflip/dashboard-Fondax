@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -8,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate } from '@/lib/utils'
 import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban } from 'lucide-react'
 import { Task, Project, CalendarEvent } from '@/lib/types'
+import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 
 export default function Dashboard() {
   const supabase = createClient()
@@ -15,6 +17,10 @@ export default function Dashboard() {
   const [highPriorityTasks, setHighPriorityTasks] = useState<Task[]>([])
   const [upcomingEventsList, setUpcomingEventsList] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Smart follow-up modal state
+  const [followUpTask, setFollowUpTask] = useState<Task | null>(null)
+  const [isFollowUpOpen, setIsFollowUpOpen] = useState(false)
 
   useEffect(() => {
     async function fetchData() {
@@ -61,6 +67,10 @@ export default function Dashboard() {
       setHighPriorityTasks(prev => 
         prev.map(t => t.id === task.id ? { ...t, status: newStatus as any } : t)
       )
+      if (newStatus === 'fait') {
+        setFollowUpTask(task)
+        setIsFollowUpOpen(true)
+      }
     }
   }
 
@@ -70,55 +80,63 @@ export default function Dashboard() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tableau de Bord IT</h1>
 
-      {/* Stats Cards */}
+      {/* Stats Cards cliquables */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
-              <ClipboardList className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Tâches ouvertes</p>
-              <h2 className="text-3xl font-bold text-slate-900">{stats.openTasks}</h2>
-            </div>
-          </CardContent>
-        </Card>
+        <Link href="/taches" className="block group">
+          <Card className="transition-all duration-200 group-hover:border-blue-400 group-hover:shadow-md cursor-pointer h-full">
+            <CardContent className="flex items-center gap-4 p-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <ClipboardList className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500 group-hover:text-blue-600 transition-colors">Tâches ouvertes</p>
+                <h2 className="text-3xl font-bold text-slate-900">{stats.openTasks}</h2>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
         
-        <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-red-100 text-red-600">
-              <Flame className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Priorité haute</p>
-              <h2 className="text-3xl font-bold text-slate-900">{stats.highPriorityTasks}</h2>
-            </div>
-          </CardContent>
-        </Card>
+        <Link href="/taches" className="block group">
+          <Card className="transition-all duration-200 group-hover:border-red-400 group-hover:shadow-md cursor-pointer h-full">
+            <CardContent className="flex items-center gap-4 p-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-red-100 text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
+                <Flame className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500 group-hover:text-red-600 transition-colors">Priorité haute</p>
+                <h2 className="text-3xl font-bold text-slate-900">{stats.highPriorityTasks}</h2>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600">
-              <FolderKanban className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Chantiers en cours</p>
-              <h2 className="text-3xl font-bold text-slate-900">{stats.activeProjects}</h2>
-            </div>
-          </CardContent>
-        </Card>
+        <Link href="/chantiers" className="block group">
+          <Card className="transition-all duration-200 group-hover:border-emerald-400 group-hover:shadow-md cursor-pointer h-full">
+            <CardContent className="flex items-center gap-4 p-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                <FolderKanban className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500 group-hover:text-emerald-600 transition-colors">Chantiers en cours</p>
+                <h2 className="text-3xl font-bold text-slate-900">{stats.activeProjects}</h2>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
 
-        <Card>
-          <CardContent className="flex items-center gap-4 p-6">
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-100 text-purple-600">
-              <Calendar className="h-6 w-6" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Événements à venir</p>
-              <h2 className="text-3xl font-bold text-slate-900">{stats.upcomingEvents}</h2>
-            </div>
-          </CardContent>
-        </Card>
+        <Link href="/calendrier" className="block group">
+          <Card className="transition-all duration-200 group-hover:border-purple-400 group-hover:shadow-md cursor-pointer h-full">
+            <CardContent className="flex items-center gap-4 p-6">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
+                <Calendar className="h-6 w-6" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500 group-hover:text-purple-600 transition-colors">Événements à venir</p>
+                <h2 className="text-3xl font-bold text-slate-900">{stats.upcomingEvents}</h2>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -211,6 +229,16 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
+
+      {/* Dialogue de suite logique sur tâche terminée */}
+      <TaskFollowUpDialog
+        open={isFollowUpOpen}
+        task={followUpTask}
+        onClose={() => {
+          setIsFollowUpOpen(false)
+          setFollowUpTask(null)
+        }}
+      />
     </div>
   )
 }

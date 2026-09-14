@@ -12,7 +12,7 @@ import { Select } from '@/components/ui/select'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { VENDOR_ISSUE_STATUS_COLORS } from '@/lib/utils'
 import { Vendor, VendorIssue } from '@/lib/types'
-import { Plus, ChevronDown, ChevronUp, Edit2 } from 'lucide-react'
+import { Plus, ChevronDown, ChevronUp, Edit2, Trash2, Pencil } from 'lucide-react'
 
 export default function PrestatairesPage() {
   const [vendors, setVendors] = useState<Vendor[]>([])
@@ -30,6 +30,11 @@ export default function PrestatairesPage() {
   const [isAddIssueOpen, setIsAddIssueOpen] = useState(false)
   const [selectedVendorForIssue, setSelectedVendorForIssue] = useState<string | null>(null)
   const [newIssue, setNewIssue] = useState({ title: '', description: '', status: 'en attente' })
+
+  // Edit Issue Dialog
+  const [isEditIssueOpen, setIsEditIssueOpen] = useState(false)
+  const [editingIssue, setEditingIssue] = useState<VendorIssue | null>(null)
+  const [editIssueForm, setEditIssueForm] = useState({ title: '', description: '', status: 'en attente' })
 
   const fetchData = async () => {
     setLoading(true)
@@ -69,6 +74,15 @@ export default function PrestatairesPage() {
     }
   }
 
+  const handleDeleteVendor = async (vendorId: string, name: string) => {
+    if (!window.confirm(`Voulez-vous vraiment supprimer le prestataire "${name}" et tous ses tickets associés ?`)) return
+    const { error } = await supabase.from('vendors').delete().eq('id', vendorId)
+    if (!error) {
+      setVendors(vendors.filter(v => v.id !== vendorId))
+      setIssues(issues.filter(i => i.vendor_id !== vendorId))
+    }
+  }
+
   const handleAddIssue = async () => {
     if (!selectedVendorForIssue) return
     const { data, error } = await supabase.from('vendor_issues').insert([{
@@ -80,7 +94,39 @@ export default function PrestatairesPage() {
     if (!error && data) {
       setIssues([data, ...issues])
       setIsAddIssueOpen(false)
-      setNewIssue({ title: '', description: '', status: 'OUVERT' })
+      setNewIssue({ title: '', description: '', status: 'en attente' })
+    }
+  }
+
+  const openEditIssue = (issue: VendorIssue) => {
+    setEditingIssue(issue)
+    setEditIssueForm({
+      title: issue.title,
+      description: issue.description || '',
+      status: issue.status
+    })
+    setIsEditIssueOpen(true)
+  }
+
+  const handleUpdateIssue = async () => {
+    if (!editingIssue) return
+    const { error } = await supabase.from('vendor_issues').update({
+      title: editIssueForm.title,
+      description: editIssueForm.description || null,
+      status: editIssueForm.status as any
+    }).eq('id', editingIssue.id)
+
+    if (!error) {
+      setIssues(issues.map(i => i.id === editingIssue.id ? { ...i, ...editIssueForm } as VendorIssue : i))
+      setIsEditIssueOpen(false)
+    }
+  }
+
+  const handleDeleteIssue = async (issueId: string, title: string) => {
+    if (!window.confirm(`Supprimer le ticket "${title}" ?`)) return
+    const { error } = await supabase.from('vendor_issues').delete().eq('id', issueId)
+    if (!error) {
+      setIssues(issues.filter(i => i.id !== issueId))
     }
   }
 
@@ -151,9 +197,17 @@ export default function PrestatairesPage() {
                     </div>
                   ) : (
                     <div className="space-y-6">
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-2">
                         <Button variant="ghost" size="sm" onClick={() => setEditingVendorId(vendor.id)}>
                           <Edit2 className="w-4 h-4 mr-2" /> Modifier
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => handleDeleteVendor(vendor.id, vendor.name)}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 className="w-4 h-4 mr-2" /> Supprimer
                         </Button>
                       </div>
                       
@@ -193,16 +247,36 @@ export default function PrestatairesPage() {
                                   </div>
                                   <p className="text-sm text-slate-600 whitespace-pre-wrap">{issue.description}</p>
                                 </div>
-                                <div className="w-48 flex-shrink-0">
-                                  <Select 
-                                    value={issue.status} 
-                                    onChange={(e) => handleUpdateIssueStatus(issue.id, e.target.value)}
-                                    className="w-full text-sm"
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <div className="w-36">
+                                    <Select 
+                                      value={issue.status} 
+                                      onChange={(e) => handleUpdateIssueStatus(issue.id, e.target.value)}
+                                      className="w-full text-sm"
+                                    >
+                                      <option value="en attente">en attente</option>
+                                      <option value="résolu">résolu</option>
+                                      <option value="non résolu">non résolu</option>
+                                    </Select>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    title="Modifier ce ticket"
+                                    onClick={() => openEditIssue(issue)}
+                                    className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
                                   >
-                                    <option value="OUVERT">OUVERT</option>
-                                    <option value="EN COURS">EN COURS</option>
-                                    <option value="RÉSOLU">RÉSOLU</option>
-                                  </Select>
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    title="Supprimer ce ticket"
+                                    onClick={() => handleDeleteIssue(issue.id, issue.title)}
+                                    className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
                                 </div>
                               </div>
                             ))
@@ -273,6 +347,45 @@ export default function PrestatairesPage() {
         <DialogFooter>
           <Button variant="outline" onClick={() => setIsAddIssueOpen(false)}>Annuler</Button>
           <Button onClick={handleAddIssue}>Enregistrer</Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Edit Issue Dialog */}
+      <Dialog open={isEditIssueOpen} onClose={() => setIsEditIssueOpen(false)}>
+        <DialogHeader>
+          <DialogTitle>Modifier le ticket</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Titre du ticket</Label>
+            <Input 
+              value={editIssueForm.title} 
+              onChange={e => setEditIssueForm({...editIssueForm, title: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Statut</Label>
+            <Select 
+              value={editIssueForm.status} 
+              onChange={e => setEditIssueForm({...editIssueForm, status: e.target.value as any})}
+            >
+              <option value="en attente">en attente</option>
+              <option value="non résolu">non résolu</option>
+              <option value="résolu">résolu</option>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Textarea 
+              value={editIssueForm.description} 
+              onChange={e => setEditIssueForm({...editIssueForm, description: e.target.value})} 
+              rows={3}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsEditIssueOpen(false)}>Annuler</Button>
+          <Button onClick={handleUpdateIssue} disabled={!editIssueForm.title}>Enregistrer les modifications</Button>
         </DialogFooter>
       </Dialog>
     </div>

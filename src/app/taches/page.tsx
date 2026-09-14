@@ -12,7 +12,8 @@ import { Select } from '@/components/ui/select'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { cn, TASK_CATEGORIES, TASK_STATUSES, TASK_PRIORITIES, PRIORITY_COLORS, STATUS_COLORS } from '@/lib/utils'
 import { Task, TaskCategory, TaskPriority, TaskStatus } from '@/lib/types'
-import { Plus, Trash2, CheckCircle2, Clock, Hourglass, Flame } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, Clock, Hourglass, Flame, Pencil, Calendar, Check } from 'lucide-react'
+import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 
 export default function TasksPage() {
   const supabase = createClient()
@@ -40,6 +41,19 @@ export default function TasksPage() {
     priority: TASK_PRIORITIES[1],
     status: TASK_STATUSES[0]
   })
+
+  // Quick schedule to calendar state
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false)
+  const [taskToSchedule, setTaskToSchedule] = useState<Task | null>(null)
+  const [schedDate, setSchedDate] = useState('')
+  const [schedTitle, setSchedTitle] = useState('')
+  const [schedType, setSchedType] = useState('échéance')
+  const [schedNotes, setSchedNotes] = useState('')
+
+  // Smart follow-up modal state
+  const [followUpTask, setFollowUpTask] = useState<Task | null>(null)
+  const [isFollowUpOpen, setIsFollowUpOpen] = useState(false)
+  const [notificationMsg, setNotificationMsg] = useState<string | null>(null)
 
   useEffect(() => {
     fetchTasks()
@@ -69,6 +83,41 @@ export default function TasksPage() {
     const { error } = await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId)
     if (!error) {
       setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus as any } : t))
+      if (newStatus === 'fait') {
+        const found = tasks.find(t => t.id === taskId)
+        if (found) {
+          setFollowUpTask({ ...found, status: 'fait' })
+          setIsFollowUpOpen(true)
+        }
+      }
+    }
+  }
+
+  const openScheduleDialog = (task: Task) => {
+    setTaskToSchedule(task)
+    setSchedTitle(task.title)
+    setSchedNotes(task.description || '')
+    const defaultDate = new Date()
+    defaultDate.setDate(defaultDate.getDate() + 1)
+    setSchedDate(defaultDate.toISOString().split('T')[0])
+    setSchedType('échéance')
+    setIsScheduleOpen(true)
+  }
+
+  const handleSaveSchedule = async () => {
+    if (!taskToSchedule || !schedDate || !schedTitle) return
+    const { error } = await supabase.from('events').insert([{
+      title: schedTitle,
+      description: schedNotes,
+      event_date: schedDate,
+      event_type: schedType,
+      status: 'à venir',
+      task_id: taskToSchedule.id
+    }])
+    if (!error) {
+      setIsScheduleOpen(false)
+      setNotificationMsg(`Tâche planifiée au calendrier pour le ${new Date(schedDate).toLocaleDateString('fr-FR')} !`)
+      setTimeout(() => setNotificationMsg(null), 4000)
     }
   }
 
@@ -108,6 +157,9 @@ export default function TasksPage() {
     if (!formData.title) return
 
     if (editingTask) {
+      const wasFait = editingTask.status === 'fait'
+      const isNowFait = formData.status === 'fait'
+
       const { data, error } = await supabase
         .from('tasks')
         .update({
@@ -124,6 +176,10 @@ export default function TasksPage() {
       if (data && !error) {
         setTasks(tasks.map(t => t.id === data.id ? data : t))
         setIsDialogOpen(false)
+        if (!wasFait && isNowFait) {
+          setFollowUpTask(data)
+          setIsFollowUpOpen(true)
+        }
       }
     } else {
       const { data, error } = await supabase
@@ -141,6 +197,10 @@ export default function TasksPage() {
       if (data && !error) {
         setTasks([data, ...tasks])
         setIsDialogOpen(false)
+        if (data.status === 'fait') {
+          setFollowUpTask(data)
+          setIsFollowUpOpen(true)
+        }
       }
     }
   }
@@ -156,11 +216,19 @@ export default function TasksPage() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tâches</h1>
-        <Button onClick={openNewTaskDialog} className="flex items-center gap-2">
+        <Button onClick={openNewTaskDialog} className="flex items-center gap-2 cursor-pointer">
           <Plus className="h-4 w-4" />
           Nouvelle tâche
         </Button>
       </div>
+
+      {/* Bannière de notification */}
+      {notificationMsg && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm p-3.5 rounded-xl flex items-center gap-2.5 shadow-xs animate-in fade-in">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          <span className="font-medium">{notificationMsg}</span>
+        </div>
+      )}
 
       {/* Onglets de filtrage rapide */}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-4">
@@ -259,22 +327,49 @@ export default function TasksPage() {
             return (
               <Card key={task.id} className={cn("flex flex-col border-l-4 transition-all", borderClass, bgClass)}>
                 <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
                       {isFait && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
                       <CardTitle 
                         className={cn(
-                          "cursor-pointer text-lg hover:text-blue-600 hover:underline",
+                          "cursor-pointer text-lg hover:text-blue-600 hover:underline truncate",
                           isFait && "line-through text-slate-500"
                         )}
                         onClick={() => openEditTaskDialog(task)}
+                        title={task.title}
                       >
                         {task.title}
                       </CardTitle>
                     </div>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(task.id)} className="h-8 w-8 text-slate-400 hover:text-red-600 shrink-0">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        title="Planifier au calendrier" 
+                        onClick={() => openScheduleDialog(task)} 
+                        className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
+                      >
+                        <Calendar className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        title="Modifier cette tâche" 
+                        onClick={() => openEditTaskDialog(task)} 
+                        className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        title="Supprimer cette tâche" 
+                        onClick={() => handleDelete(task.id)} 
+                        className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                   
                   {isAttente && (
@@ -396,6 +491,82 @@ export default function TasksPage() {
           </Button>
         </DialogFooter>
       </Dialog>
+
+      {/* Dialog Planifier au Calendrier */}
+      <Dialog open={isScheduleOpen} onClose={() => setIsScheduleOpen(false)}>
+        <DialogHeader>
+          <div className="flex items-center gap-2 text-blue-600">
+            <Calendar className="w-5 h-5" />
+            <DialogTitle>Planifier la tâche au calendrier</DialogTitle>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Créer un point de calendrier ou une échéance rattachée à cette tâche.
+          </p>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label>Titre de l'événement</Label>
+            <Input 
+              value={schedTitle} 
+              onChange={e => setSchedTitle(e.target.value)} 
+              placeholder="ex: Échéance : Finalisation licences M365"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Date de l'événement</Label>
+              <Input 
+                type="date" 
+                value={schedDate} 
+                onChange={e => setSchedDate(e.target.value)} 
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Type d'événement</Label>
+              <select
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+                value={schedType}
+                onChange={e => setSchedType(e.target.value)}
+              >
+                <option value="échéance">Échéance</option>
+                <option value="étape chantier">Étape chantier</option>
+                <option value="rdv">Rendez-vous terrain</option>
+                <option value="appel">Appel prestataire</option>
+              </select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Détails complémentaires</Label>
+            <Textarea 
+              value={schedNotes} 
+              onChange={e => setSchedNotes(e.target.value)} 
+              rows={3} 
+              placeholder="Notes ou consignes pour cette échéance..."
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsScheduleOpen(false)}>Annuler</Button>
+          <Button onClick={handleSaveSchedule} disabled={!schedTitle || !schedDate}>
+            Ajouter au calendrier
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Workflow Intelligent Suite Logique */}
+      <TaskFollowUpDialog
+        open={isFollowUpOpen}
+        task={followUpTask}
+        onClose={() => {
+          setIsFollowUpOpen(false)
+          setFollowUpTask(null)
+        }}
+        onSuccessMessage={(msg) => {
+          setNotificationMsg(msg)
+          setTimeout(() => setNotificationMsg(null), 4000)
+          fetchTasks()
+        }}
+      />
     </div>
   )
 }

@@ -12,7 +12,7 @@ import { Select } from '@/components/ui/select'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { PROJECT_STATUS_COLORS } from '@/lib/utils'
 import { Project, ProjectStatus } from '@/lib/types'
-import { Plus } from 'lucide-react'
+import { Plus, Pencil, Trash2 } from 'lucide-react'
 
 export default function ChantiersPage() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -22,6 +22,16 @@ export default function ChantiersPage() {
 
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false)
   const [newProject, setNewProject] = useState({ priority_order: 1, name: '', description: '', status: 'À FAIRE', notes_blockers: '' })
+
+  const [isEditProjectOpen, setIsEditProjectOpen] = useState(false)
+  const [editingProject, setEditingProject] = useState<Project | null>(null)
+  const [editProjectForm, setEditProjectForm] = useState({
+    priority_order: 1,
+    name: '',
+    description: '',
+    status: 'À FAIRE' as ProjectStatus,
+    notes_blockers: ''
+  })
 
   const fetchProjects = async () => {
     setLoading(true)
@@ -61,6 +71,47 @@ export default function ChantiersPage() {
       setProjects([...projects, data].sort((a, b) => a.priority_order - b.priority_order))
       setIsAddProjectOpen(false)
       setNewProject({ priority_order: projects.length + 2, name: '', description: '', status: 'À FAIRE', notes_blockers: '' })
+    }
+  }
+
+  const openEditProject = (project: Project) => {
+    setEditingProject(project)
+    setEditProjectForm({
+      priority_order: project.priority_order,
+      name: project.name,
+      description: project.description || '',
+      status: project.status,
+      notes_blockers: project.notes_blockers || ''
+    })
+    setIsEditProjectOpen(true)
+  }
+
+  const handleUpdateProject = async () => {
+    if (!editingProject) return
+    const { data, error } = await supabase
+      .from('projects')
+      .update({
+        priority_order: Number(editProjectForm.priority_order),
+        name: editProjectForm.name,
+        description: editProjectForm.description || null,
+        status: editProjectForm.status,
+        notes_blockers: editProjectForm.notes_blockers || null
+      })
+      .eq('id', editingProject.id)
+      .select()
+      .single()
+
+    if (!error && data) {
+      setProjects(projects.map(p => p.id === data.id ? data : p).sort((a, b) => a.priority_order - b.priority_order))
+      setIsEditProjectOpen(false)
+    }
+  }
+
+  const handleDeleteProject = async (projectId: string, name: string) => {
+    if (!window.confirm(`Supprimer définitivement le chantier "${name}" ?`)) return
+    const { error } = await supabase.from('projects').delete().eq('id', projectId)
+    if (!error) {
+      setProjects(projects.filter(p => p.id !== projectId))
     }
   }
 
@@ -119,16 +170,36 @@ export default function ChantiersPage() {
                         </div>
                         <p className="text-slate-600">{project.description}</p>
                       </div>
-                      <div className="w-40 flex-shrink-0">
-                        <Select 
-                          value={project.status} 
-                          onChange={(e) => handleStatusChange(project.id, e.target.value)}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="w-36">
+                          <Select 
+                            value={project.status} 
+                            onChange={(e) => handleStatusChange(project.id, e.target.value)}
+                          >
+                            <option value="À FAIRE">À FAIRE</option>
+                            <option value="EN COURS">EN COURS</option>
+                            <option value="EN ATTENTE">EN ATTENTE</option>
+                            <option value="TERMINÉ">TERMINÉ</option>
+                          </Select>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Modifier ce chantier"
+                          onClick={() => openEditProject(project)}
+                          className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
                         >
-                          <option value="À FAIRE">À FAIRE</option>
-                          <option value="EN COURS">EN COURS</option>
-                          <option value="EN ATTENTE">EN ATTENTE</option>
-                          <option value="TERMINÉ">TERMINÉ</option>
-                        </Select>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Supprimer ce chantier"
+                          onClick={() => handleDeleteProject(project.id, project.name)}
+                          className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                     
@@ -149,6 +220,7 @@ export default function ChantiersPage() {
         )}
       </div>
 
+      {/* Dialog: Ajouter un chantier */}
       <Dialog open={isAddProjectOpen} onClose={() => setIsAddProjectOpen(false)}>
         <DialogHeader>
           <DialogTitle>Ajouter un chantier</DialogTitle>
@@ -157,7 +229,7 @@ export default function ChantiersPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Ordre de priorité</Label>
-              <Input type="number" value={newProject.priority_order} onChange={e => setNewProject({...newProject, priority_order: parseInt(e.target.value)})} />
+              <Input type="number" value={newProject.priority_order} onChange={e => setNewProject({...newProject, priority_order: parseInt(e.target.value) || 1})} />
             </div>
             <div className="space-y-2">
               <Label>Statut</Label>
@@ -184,7 +256,64 @@ export default function ChantiersPage() {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setIsAddProjectOpen(false)}>Annuler</Button>
-          <Button onClick={handleAddProject}>Enregistrer</Button>
+          <Button onClick={handleAddProject} disabled={!newProject.name}>Enregistrer</Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Dialog: Modifier un chantier */}
+      <Dialog open={isEditProjectOpen} onClose={() => setIsEditProjectOpen(false)}>
+        <DialogHeader>
+          <DialogTitle>Modifier le chantier</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Ordre de priorité</Label>
+              <Input 
+                type="number" 
+                value={editProjectForm.priority_order} 
+                onChange={e => setEditProjectForm({...editProjectForm, priority_order: parseInt(e.target.value) || 1})} 
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Statut</Label>
+              <Select 
+                value={editProjectForm.status} 
+                onChange={e => setEditProjectForm({...editProjectForm, status: e.target.value as ProjectStatus})}
+              >
+                <option value="À FAIRE">À FAIRE</option>
+                <option value="EN COURS">EN COURS</option>
+                <option value="EN ATTENTE">EN ATTENTE</option>
+                <option value="TERMINÉ">TERMINÉ</option>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Nom du chantier</Label>
+            <Input 
+              value={editProjectForm.name} 
+              onChange={e => setEditProjectForm({...editProjectForm, name: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Textarea 
+              value={editProjectForm.description} 
+              onChange={e => setEditProjectForm({...editProjectForm, description: e.target.value})} 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Notes & points bloquants</Label>
+            <Textarea 
+              value={editProjectForm.notes_blockers} 
+              onChange={e => setEditProjectForm({...editProjectForm, notes_blockers: e.target.value})} 
+              rows={4}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsEditProjectOpen(false)}>Annuler</Button>
+          <Button onClick={handleUpdateProject} disabled={!editProjectForm.name}>Enregistrer les modifications</Button>
         </DialogFooter>
       </Dialog>
     </div>

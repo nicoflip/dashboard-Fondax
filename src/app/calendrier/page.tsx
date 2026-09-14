@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
-import { CalendarEvent } from '@/lib/types'
+import { CalendarEvent, Task, Vendor } from '@/lib/types'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
 
@@ -18,12 +18,14 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent } from '@/components/ui/dialog'
-import { Calendar as CalendarIcon, Plus, Trash2 } from 'lucide-react'
+import { Calendar as CalendarIcon, Plus, Trash2, Pencil, CheckCircle2 } from 'lucide-react'
 import { EVENT_TYPES, EVENT_STATUSES, EVENT_TYPE_LABELS, formatDate } from '@/lib/utils'
 
 export default function CalendrierPage() {
   const supabase = createClient()
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [vendors, setVendors] = useState<Vendor[]>([])
   const [loading, setLoading] = useState(true)
   
   const [isAddOpen, setIsAddOpen] = useState(false)
@@ -39,6 +41,8 @@ export default function CalendrierPage() {
   const [endDate, setEndDate] = useState('')
   const [eventType, setEventType] = useState('intervention')
   const [status, setStatus] = useState('à venir')
+  const [taskId, setTaskId] = useState('')
+  const [vendorId, setVendorId] = useState('')
 
   useEffect(() => {
     fetchEvents()
@@ -46,14 +50,15 @@ export default function CalendrierPage() {
 
   const fetchEvents = async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .order('event_date', { ascending: true })
+    const [eventsRes, tasksRes, vendorsRes] = await Promise.all([
+      supabase.from('events').select('*').order('event_date', { ascending: true }),
+      supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+      supabase.from('vendors').select('*').order('name', { ascending: true })
+    ])
       
-    if (!error && data) {
-      setEvents(data as CalendarEvent[])
-    }
+    if (eventsRes.data) setEvents(eventsRes.data as CalendarEvent[])
+    if (tasksRes.data) setTasks(tasksRes.data as Task[])
+    if (vendorsRes.data) setVendors(vendorsRes.data as Vendor[])
     setLoading(false)
   }
 
@@ -74,6 +79,8 @@ export default function CalendrierPage() {
       setEndDate(event.end_date ? event.end_date.split('T')[0] : '')
       setEventType(event.event_type)
       setStatus(event.status)
+      setTaskId(event.task_id || '')
+      setVendorId(event.vendor_id || '')
       setIsEditOpen(true)
     }
   }
@@ -85,7 +92,20 @@ export default function CalendrierPage() {
     setEndDate('')
     setEventType('intervention')
     setStatus('à venir')
+    setTaskId('')
+    setVendorId('')
     setSelectedEvent(null)
+  }
+
+  const handleSelectTaskForEvent = (selectedTid: string) => {
+    setTaskId(selectedTid)
+    if (selectedTid) {
+      const t = tasks.find(tsk => tsk.id === selectedTid)
+      if (t) {
+        if (!title) setTitle(t.title)
+        if (!description && t.description) setDescription(t.description)
+      }
+    }
   }
 
   const handleAdd = async () => {
@@ -96,7 +116,9 @@ export default function CalendrierPage() {
         event_date: eventDate,
         end_date: endDate || null,
         event_type: eventType,
-        status
+        status,
+        task_id: taskId || null,
+        vendor_id: vendorId || null
       }
     ])
     if (!error) {
@@ -115,7 +137,9 @@ export default function CalendrierPage() {
         event_date: eventDate,
         end_date: endDate || null,
         event_type: eventType,
-        status
+        status,
+        task_id: taskId || null,
+        vendor_id: vendorId || null
       })
       .eq('id', selectedEvent.id)
       
@@ -127,6 +151,7 @@ export default function CalendrierPage() {
 
   const handleDelete = async () => {
     if (!selectedEvent) return
+    if (!window.confirm('Voulez-vous supprimer cet événement du calendrier ?')) return
     const { error } = await supabase
       .from('events')
       .delete()
@@ -201,22 +226,72 @@ export default function CalendrierPage() {
               const isPastEvent = event.status === 'passé'
               const borderClass = isPastEvent ? 'border-l-4 border-l-slate-400' : 
                                  event.status === 'en attente' ? 'border-l-4 border-l-amber-500' : 'border-l-4 border-l-blue-500'
+              const linkedTask = tasks.find(t => t.id === event.task_id)
+              const linkedVendor = vendors.find(v => v.id === event.vendor_id)
+
               return (
-                <Card key={event.id} className={`${borderClass} cursor-pointer hover:bg-slate-50`} onClick={() => handleEventClick({event: {id: event.id}})}>
+                <Card 
+                  key={event.id} 
+                  className={`${borderClass} cursor-pointer hover:bg-slate-50 transition-all`} 
+                  onClick={() => handleEventClick({event: {id: event.id}})}
+                >
                   <CardHeader className="pb-2">
-                    <div className="flex justify-between items-start">
-                      <CardTitle className="text-base">{event.title}</CardTitle>
-                      <Badge variant={isPastEvent ? "secondary" : "default"}>{typeLabel}</Badge>
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="text-base truncate" title={event.title}>{event.title}</CardTitle>
+                        <div className="text-xs text-slate-500 flex items-center mt-1">
+                          <CalendarIcon className="mr-1.5 h-3.5 w-3.5" />
+                          {formatDate(event.event_date)}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Badge variant={isPastEvent ? "secondary" : "default"} className="text-xs">{typeLabel}</Badge>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Modifier cet événement"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleEventClick({ event: { id: event.id } })
+                          }}
+                          className="h-7 w-7 text-slate-400 hover:text-blue-600 cursor-pointer"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Supprimer cet événement"
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            if (window.confirm('Voulez-vous supprimer cet événement ?')) {
+                              await supabase.from('events').delete().eq('id', event.id)
+                              fetchEvents()
+                            }
+                          }}
+                          className="h-7 w-7 text-slate-400 hover:text-red-600 cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
-                  <CardContent>
-                    <div className="text-sm text-slate-500 flex items-center mb-2">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {formatDate(event.event_date)}
-                    </div>
+                  <CardContent className="space-y-2">
                     {event.description && (
                       <p className="text-sm text-slate-700 line-clamp-2">{event.description}</p>
                     )}
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {linkedTask && (
+                        <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-800 border-blue-200">
+                          Tâche : {linkedTask.title}
+                        </Badge>
+                      )}
+                      {linkedVendor && (
+                        <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-800 border-amber-200">
+                          Prestataire : {linkedVendor.name}
+                        </Badge>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               )
@@ -225,60 +300,101 @@ export default function CalendrierPage() {
         )}
       </div>
 
+      {/* Dialog: Ajouter un événement */}
       <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Ajouter un événement</DialogTitle>
+            <DialogTitle>Ajouter un événement au calendrier</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label>Titre</Label>
+              <Label>Lier à une tâche IT existante (optionnel)</Label>
+              <select
+                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+                value={taskId}
+                onChange={e => handleSelectTaskForEvent(e.target.value)}
+              >
+                <option value="">-- Aucune tâche liée --</option>
+                {tasks.map(t => (
+                  <option key={t.id} value={t.id}>
+                    [{t.category}] {t.title} ({t.status})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Titre de l'événement <span className="text-red-500">*</span></Label>
               <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Titre de l'événement" />
             </div>
-            <div className="space-y-2">
-              <Label>Date</Label>
-              <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} />
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Date de fin (optionnelle)</Label>
+                <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Date de fin (optionnelle)</Label>
-              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <select 
+                  className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                  value={eventType} 
+                  onChange={e => setEventType(e.target.value as any)}
+                >
+                  {EVENT_TYPES.map(t => (
+                    <option key={t} value={t}>{EVENT_TYPE_LABELS[t] || t}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Statut</Label>
+                <select 
+                  className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                  value={status} 
+                  onChange={e => setStatus(e.target.value as any)}
+                >
+                  {EVENT_STATUSES.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
             </div>
+
             <div className="space-y-2">
-              <Label>Type</Label>
-              <select 
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                value={eventType} 
-                onChange={e => setEventType(e.target.value)}
+              <Label>Lier à un prestataire (optionnel)</Label>
+              <select
+                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+                value={vendorId}
+                onChange={e => setVendorId(e.target.value)}
               >
-                {EVENT_TYPES.map(t => (
-                  <option key={t} value={t}>{EVENT_TYPE_LABELS[t] || t}</option>
+                <option value="">-- Aucun prestataire lié --</option>
+                {vendors.map(v => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
                 ))}
               </select>
             </div>
+
             <div className="space-y-2">
-              <Label>Statut</Label>
-              <select 
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                value={status} 
-                onChange={e => setStatus(e.target.value)}
-              >
-                {EVENT_STATUSES.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Détails..." />
+              <Label>Description / Notes</Label>
+              <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Détails..." rows={3} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddOpen(false)}>Annuler</Button>
-            <Button onClick={handleAdd}>Enregistrer</Button>
+            <Button onClick={handleAdd} disabled={!title || !eventDate}>Enregistrer</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
+      {/* Dialog: Modifier un événement */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
         <DialogContent>
           <DialogHeader>
@@ -286,44 +402,83 @@ export default function CalendrierPage() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
+              <Label>Lier à une tâche IT (optionnel)</Label>
+              <select
+                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+                value={taskId}
+                onChange={e => setTaskId(e.target.value)}
+              >
+                <option value="">-- Aucune tâche liée --</option>
+                {tasks.map(t => (
+                  <option key={t.id} value={t.id}>
+                    [{t.category}] {t.title} ({t.status})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
               <Label>Titre</Label>
               <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Titre de l'événement" />
             </div>
-            <div className="space-y-2">
-              <Label>Date</Label>
-              <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} />
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Input type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Date de fin (optionnelle)</Label>
+                <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Date de fin (optionnelle)</Label>
-              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <select 
+                  className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                  value={eventType} 
+                  onChange={e => setEventType(e.target.value as any)}
+                >
+                  {EVENT_TYPES.map(t => (
+                    <option key={t} value={t}>{EVENT_TYPE_LABELS[t] || t}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>Statut</Label>
+                <select 
+                  className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                  value={status} 
+                  onChange={e => setStatus(e.target.value as any)}
+                >
+                  {EVENT_STATUSES.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
             </div>
+
             <div className="space-y-2">
-              <Label>Type</Label>
-              <select 
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                value={eventType} 
-                onChange={e => setEventType(e.target.value)}
+              <Label>Lier à un prestataire (optionnel)</Label>
+              <select
+                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+                value={vendorId}
+                onChange={e => setVendorId(e.target.value)}
               >
-                {EVENT_TYPES.map(t => (
-                  <option key={t} value={t}>{EVENT_TYPE_LABELS[t] || t}</option>
+                <option value="">-- Aucun prestataire lié --</option>
+                {vendors.map(v => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
                 ))}
               </select>
             </div>
-            <div className="space-y-2">
-              <Label>Statut</Label>
-              <select 
-                className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                value={status} 
-                onChange={e => setStatus(e.target.value)}
-              >
-                {EVENT_STATUSES.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
+
             <div className="space-y-2">
               <Label>Description</Label>
-              <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Détails..." />
+              <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Détails..." rows={3} />
             </div>
           </div>
           <DialogFooter className="flex justify-between sm:justify-between">
