@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Task, Project, EventType } from '@/lib/types'
-import { CheckCircle2, Calendar, FolderKanban, PlusCircle, ArrowRight } from 'lucide-react'
+import { CheckCircle2, Calendar, FolderKanban, PlusCircle, ArrowRight, Clock } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 interface TaskFollowUpDialogProps {
   task: Task | null
@@ -27,6 +28,9 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
   // Calendar form
   const [calTitle, setCalTitle] = useState('')
   const [calDate, setCalDate] = useState('')
+  const [calEndDate, setCalEndDate] = useState('')
+  const [calIsFlexible, setCalIsFlexible] = useState(false)
+  const [calFlexLabel, setCalFlexLabel] = useState('Dans les 2 prochaines semaines')
   const [calType, setCalType] = useState<EventType>('étape chantier')
   const [calDesc, setCalDesc] = useState('')
 
@@ -77,17 +81,33 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
   const handleSaveCalendar = async () => {
     if (!calTitle || !calDate) return
     setSaving(true)
+    const finalDesc = calIsFlexible
+      ? `[Période flexible : ${calFlexLabel || 'Dans les 2 prochaines semaines'}]\n${calDesc}`.trim()
+      : calDesc
+
+    let finalEndDate = calEndDate || null
+    if (calIsFlexible && !finalEndDate && calDate) {
+      const d = new Date(calDate)
+      d.setDate(d.getDate() + 14)
+      finalEndDate = d.toISOString().split('T')[0]
+    }
+
     const { error } = await supabase.from('events').insert([{
       title: calTitle,
-      description: calDesc,
+      description: finalDesc,
       event_date: calDate,
+      end_date: finalEndDate,
       event_type: calType,
       status: 'à venir',
       task_id: task.id
     }])
     setSaving(false)
     if (!error) {
-      onSuccessMessage?.(`Événement "${calTitle}" ajouté au calendrier !`)
+      onSuccessMessage?.(
+        calIsFlexible 
+          ? `Événement "${calTitle}" planifié au calendrier (${calFlexLabel}) !`
+          : `Événement "${calTitle}" ajouté au calendrier !`
+      )
       onClose()
     }
   }
@@ -229,24 +249,95 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
               <Input value={calTitle} onChange={e => setCalTitle(e.target.value)} />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Date de rendez-vous / débrief</Label>
-                <Input type="date" value={calDate} onChange={e => setCalDate(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Type d'événement</Label>
-                <select 
-                  className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                  value={calType} 
-                  onChange={e => setCalType(e.target.value as EventType)}
+            {/* Mode Date Flexible */}
+            <div className="rounded-lg border border-purple-200 bg-purple-50/50 p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-purple-950 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-purple-600" />
+                  Date flexible / Période approximative
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!calIsFlexible) {
+                      const start = new Date()
+                      const end = new Date()
+                      end.setDate(start.getDate() + 14)
+                      setCalDate(start.toISOString().split('T')[0])
+                      setCalEndDate(end.toISOString().split('T')[0])
+                      setCalFlexLabel('Dans les 2 prochaines semaines')
+                      setCalIsFlexible(true)
+                    } else {
+                      setCalIsFlexible(false)
+                    }
+                  }}
+                  className={cn(
+                    "text-[11px] px-2.5 py-0.5 rounded-full font-medium border cursor-pointer transition-colors",
+                    calIsFlexible
+                      ? "bg-purple-600 text-white border-purple-600 shadow-2xs"
+                      : "bg-white text-slate-600 border-slate-300 hover:bg-slate-100"
+                  )}
                 >
-                  <option value="étape chantier">Étape chantier</option>
-                  <option value="rdv">Rendez-vous terrain</option>
-                  <option value="appel">Appel prestataire</option>
-                  <option value="échéance">Échéance / Contrôle</option>
-                </select>
+                  {calIsFlexible ? "✓ Flexible activé" : "Activer date flexible"}
+                </button>
               </div>
+
+              {calIsFlexible ? (
+                <div className="space-y-2 pt-1 border-t border-purple-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const start = new Date()
+                      const end = new Date()
+                      end.setDate(start.getDate() + 14)
+                      setCalDate(start.toISOString().split('T')[0])
+                      setCalEndDate(end.toISOString().split('T')[0])
+                      setCalFlexLabel('Dans les 2 prochaines semaines')
+                    }}
+                    className="text-xs px-2.5 py-1 rounded bg-white hover:bg-purple-100 border border-purple-300 text-purple-800 font-semibold cursor-pointer shadow-2xs"
+                  >
+                    ⚡ Dans les 2 prochaines semaines
+                  </button>
+                  <div className="space-y-1">
+                    <Label className="text-[11px] text-purple-900 font-medium">Libellé</Label>
+                    <Input
+                      value={calFlexLabel}
+                      onChange={e => setCalFlexLabel(e.target.value)}
+                      placeholder="Ex: Dans les deux prochaines semaines"
+                      className="bg-white h-8 text-xs"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-slate-600">Début estimé</Label>
+                      <Input type="date" value={calDate} onChange={e => setCalDate(e.target.value)} className="bg-white h-8 text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] text-slate-600">Fin estimée</Label>
+                      <Input type="date" value={calEndDate} onChange={e => setCalEndDate(e.target.value)} className="bg-white h-8 text-xs" />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1 pt-1">
+                  <Label className="text-xs">Date fixe de rendez-vous / débrief</Label>
+                  <Input type="date" value={calDate} onChange={e => setCalDate(e.target.value)} className="bg-white" />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <Label>Type d'événement</Label>
+              <select 
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+                value={calType} 
+                onChange={e => setCalType(e.target.value as EventType)}
+              >
+                <option value="étape chantier">Étape chantier</option>
+                <option value="rdv">Rendez-vous terrain</option>
+                <option value="appel">Appel prestataire</option>
+                <option value="échéance">Échéance / Contrôle</option>
+              </select>
             </div>
 
             <div className="space-y-1">

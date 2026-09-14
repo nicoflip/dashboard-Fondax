@@ -11,6 +11,19 @@ import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, Folde
 import { Task, Project, CalendarEvent } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 
+function parseFlexibleEvent(desc: string | null | undefined) {
+  if (!desc) return { isFlexible: false, flexLabel: '', cleanDesc: '' }
+  const match = desc.match(/^\[Période flexible\s*:\s*([^\]]+)\]\s*\n?([\s\S]*)$/i)
+  if (match) {
+    return {
+      isFlexible: true,
+      flexLabel: match[1].trim(),
+      cleanDesc: match[2].trim()
+    }
+  }
+  return { isFlexible: false, flexLabel: '', cleanDesc: desc }
+}
+
 export default function Dashboard() {
   const supabase = createClient()
   const [stats, setStats] = useState({ openTasks: 0, highPriorityTasks: 0, activeProjects: 0, upcomingEvents: 0 })
@@ -217,30 +230,68 @@ export default function Dashboard() {
         {/* Événements à venir */}
         <div className="space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Clock className="h-5 w-5 text-slate-500" />
-                Événements à venir
-              </CardTitle>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-purple-600" />
+                  Événements à venir ({upcomingEventsList.length})
+                </CardTitle>
+                <Link
+                  href="/calendrier?filter=a_venir"
+                  className="text-xs font-semibold text-purple-600 hover:text-purple-800 hover:underline flex items-center gap-1"
+                >
+                  Voir tout &rarr;
+                </Link>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3">
               {upcomingEventsList.length === 0 ? (
                 <p className="text-sm text-slate-500">Aucun événement à venir.</p>
               ) : (
-                upcomingEventsList.map(event => (
-                  <div key={event.id} className="flex flex-col gap-2 rounded-lg border p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h4 className="font-semibold text-slate-900">{event.title}</h4>
-                      <p className="text-sm text-slate-500">{formatDate(event.event_date)}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 sm:flex-row sm:items-center">
-                      <Badge variant="secondary" className="text-xs">
-                        {EVENT_TYPE_LABELS[event.event_type] || event.event_type}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs">{event.status}</Badge>
-                    </div>
-                  </div>
-                ))
+                upcomingEventsList.map(event => {
+                  const parsed = parseFlexibleEvent(event.description)
+                  return (
+                    <Link
+                      key={event.id}
+                      href="/calendrier"
+                      className={cn(
+                        "flex flex-col gap-2 rounded-lg border p-3.5 shadow-2xs sm:flex-row sm:items-center sm:justify-between transition-colors hover:shadow-xs",
+                        parsed.isFlexible 
+                          ? "border-l-[5px] border-l-purple-500 border-purple-200 bg-purple-50/25 hover:bg-purple-50/50" 
+                          : "hover:bg-slate-50 border-slate-200"
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <h4 className="font-semibold text-slate-900 text-sm truncate flex items-center gap-1.5" title={event.title}>
+                          {parsed.isFlexible && <span className="text-purple-600 text-xs">⏳</span>}
+                          <span>{event.title}</span>
+                        </h4>
+                        <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                          <Calendar className={cn("w-3.5 h-3.5", parsed.isFlexible ? "text-purple-600" : "text-slate-400")} />
+                          {parsed.isFlexible && event.end_date ? (
+                            <span className="font-semibold text-purple-900">
+                              Entre le {formatDate(event.event_date)} et le {formatDate(event.end_date)}
+                            </span>
+                          ) : (
+                            <span>{formatDate(event.event_date)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                        {parsed.isFlexible && (
+                          <Badge className="text-[10px] bg-purple-100 text-purple-800 border border-purple-300 font-semibold flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-purple-600" />
+                            {parsed.flexLabel}
+                          </Badge>
+                        )}
+                        <Badge variant="secondary" className="text-xs">
+                          {EVENT_TYPE_LABELS[event.event_type] || event.event_type}
+                        </Badge>
+                        <Badge variant="outline" className="text-xs">{event.status}</Badge>
+                      </div>
+                    </Link>
+                  )
+                })
               )}
             </CardContent>
           </Card>

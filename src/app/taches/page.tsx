@@ -51,6 +51,9 @@ function TasksContent() {
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
   const [taskToSchedule, setTaskToSchedule] = useState<Task | null>(null)
   const [schedDate, setSchedDate] = useState('')
+  const [schedEndDate, setSchedEndDate] = useState('')
+  const [schedIsFlexible, setSchedIsFlexible] = useState(false)
+  const [schedFlexLabel, setSchedFlexLabel] = useState('Dans les 2 prochaines semaines')
   const [schedTitle, setSchedTitle] = useState('')
   const [schedType, setSchedType] = useState('échéance')
   const [schedNotes, setSchedNotes] = useState('')
@@ -103,11 +106,19 @@ function TasksContent() {
     if (filterPriority !== 'all' && task.priority !== filterPriority) return false
     return true
   }).sort((a, b) => {
-    // Priority sorting: 'haute' first, then 'moyenne', then 'basse'
+    // 1. Les tâches terminées ("fait") sont systématiquement reléguées TOUT EN BAS de la page
+    const isDoneA = a.status === 'fait'
+    const isDoneB = b.status === 'fait'
+    if (isDoneA && !isDoneB) return 1
+    if (!isDoneA && isDoneB) return -1
+
+    // 2. Pour les tâches actives : tri par priorité (haute d'abord, puis moyenne, puis basse)
     const prioOrder: Record<string, number> = { 'haute': 1, 'moyenne': 2, 'basse': 3 }
     const orderA = prioOrder[a.priority] || 99
     const orderB = prioOrder[b.priority] || 99
     if (orderA !== orderB) return orderA - orderB
+
+    // 3. À priorité égale : les plus récentes d'abord
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
 
@@ -132,23 +143,45 @@ function TasksContent() {
     const defaultDate = new Date()
     defaultDate.setDate(defaultDate.getDate() + 1)
     setSchedDate(defaultDate.toISOString().split('T')[0])
+    setSchedEndDate('')
+    setSchedIsFlexible(false)
+    setSchedFlexLabel('Dans les 2 prochaines semaines')
     setSchedType('échéance')
     setIsScheduleOpen(true)
   }
 
+  const setSchedFlexiblePreset2Weeks = () => {
+    const start = new Date()
+    const end = new Date()
+    end.setDate(start.getDate() + 14)
+    setSchedDate(start.toISOString().split('T')[0])
+    setSchedEndDate(end.toISOString().split('T')[0])
+    setSchedIsFlexible(true)
+    setSchedFlexLabel('Dans les 2 prochaines semaines')
+  }
+
   const handleSaveSchedule = async () => {
     if (!taskToSchedule || !schedDate || !schedTitle) return
+    const finalDesc = schedIsFlexible
+      ? `[Période flexible : ${schedFlexLabel || 'Dans les 2 prochaines semaines'}]\n${schedNotes}`.trim()
+      : schedNotes
+
     const { error } = await supabase.from('events').insert([{
       title: schedTitle,
-      description: schedNotes,
+      description: finalDesc,
       event_date: schedDate,
+      end_date: schedIsFlexible && schedEndDate ? schedEndDate : null,
       event_type: schedType,
       status: 'à venir',
       task_id: taskToSchedule.id
     }])
     if (!error) {
       setIsScheduleOpen(false)
-      setNotificationMsg(`Tâche planifiée au calendrier pour le ${new Date(schedDate).toLocaleDateString('fr-FR')} !`)
+      setNotificationMsg(
+        schedIsFlexible 
+          ? `Tâche planifiée au calendrier (${schedFlexLabel || 'Période flexible'}) !`
+          : `Tâche planifiée au calendrier pour le ${new Date(schedDate).toLocaleDateString('fr-FR')} !`
+      )
       setTimeout(() => setNotificationMsg(null), 4000)
     }
   }
@@ -244,6 +277,164 @@ function TasksContent() {
   const countAttente = tasks.filter(t => t.status === 'en attente de retour externe').length
   const countFait = tasks.filter(t => t.status === 'fait').length
   const countToutes = tasks.length
+
+  const activeTasks = filteredTasks.filter(t => t.status !== 'fait')
+  const doneTasks = filteredTasks.filter(t => t.status === 'fait')
+
+  const renderTaskCard = (task: Task) => {
+    const isAttente = task.status === 'en attente de retour externe'
+    const isFait = task.status === 'fait'
+    const isEnCours = task.status === 'en cours'
+    const isAFaire = task.status === 'à faire'
+    const isHighPrio = task.priority === 'haute'
+    const isUrgent = isHighPrio && !isFait
+
+    // Styling fort pour les tâches urgentes afin qu'elles sautent immédiatement aux yeux
+    const borderClass = isUrgent 
+      ? 'border-l-[6px] border-l-red-600 border-red-300 ring-2 ring-red-400/40 shadow-md shadow-red-100/70' 
+      : isAttente 
+      ? 'border-l-4 border-amber-500' 
+      : isFait 
+      ? 'border-l-4 border-slate-300 opacity-60 bg-slate-50' 
+      : isEnCours 
+      ? 'border-l-4 border-blue-500' 
+      : 'border-l-4 border-slate-300'
+
+    const bgClass = isUrgent 
+      ? 'bg-gradient-to-br from-red-50/70 via-white to-red-50/30' 
+      : isAttente 
+      ? 'bg-amber-50/40' 
+      : isFait 
+      ? 'bg-slate-50/90' 
+      : 'bg-white'
+
+    return (
+      <Card key={task.id} className={cn("flex flex-col transition-all relative overflow-hidden", borderClass, bgClass)}>
+        {/* Bandeau d'alerte URGENT en haut de la carte */}
+        {isUrgent && (
+          <div className="bg-gradient-to-r from-red-600 via-red-600 to-rose-600 text-white px-3 py-1.5 text-xs font-black shadow-xs flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Flame className="w-4 h-4 fill-amber-300 text-amber-300 animate-pulse shrink-0" />
+              <span>URGENT — PRIORITÉ HAUTE</span>
+            </span>
+            <span className="bg-red-800/90 text-white text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded">
+              Action immédiate
+            </span>
+          </div>
+        )}
+
+        <CardHeader className={cn("pb-3", isUrgent ? "pt-3" : "pt-4")}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              {isFait && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
+              {isUrgent && <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-bounce" />}
+              <CardTitle 
+                className={cn(
+                  "cursor-pointer text-lg hover:text-blue-600 hover:underline truncate",
+                  isUrgent && "font-black text-red-950",
+                  isFait && "line-through text-slate-400 font-normal"
+                )}
+                onClick={() => openEditTaskDialog(task)}
+                title={task.title}
+              >
+                {task.title}
+              </CardTitle>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                title="Planifier au calendrier" 
+                onClick={() => openScheduleDialog(task)} 
+                className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
+              >
+                <Calendar className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                title="Modifier cette tâche" 
+                onClick={() => openEditTaskDialog(task)} 
+                className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                title="Supprimer cette tâche" 
+                onClick={() => handleDelete(task.id)} 
+                className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          
+          {isAttente && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 border border-amber-200 w-fit">
+              <Hourglass className="w-3.5 h-3.5" />
+              En attente retour externe
+            </div>
+          )}
+          {isFait && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-medium text-slate-600 border border-slate-300 w-fit">
+              <Check className="w-3.5 h-3.5 text-emerald-600" />
+              Terminé (Classé en bas)
+            </div>
+          )}
+
+          <CardDescription className="line-clamp-2 mt-2">
+            {task.description ? (
+              isAttente ? 
+                <span className="text-amber-900 font-medium">{task.description}</span> 
+                : isUrgent ?
+                <span className="text-slate-800 font-medium">{task.description}</span>
+                : isFait ?
+                <span className="text-slate-400 italic">{task.description}</span>
+                : task.description
+            ) : <span className="italic text-slate-400">Aucune description</span>}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="mt-auto pb-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className={cn(isUrgent && "border-red-200 bg-white text-slate-800 font-semibold", isFait && "opacity-60")}>
+              {task.category}
+            </Badge>
+            {isUrgent ? (
+              <Badge className="bg-red-600 text-white font-black flex items-center gap-1 shadow-xs border-red-700">
+                <Flame className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
+                Haute priorité (Urgent)
+              </Badge>
+            ) : isHighPrio ? (
+              <Badge className={cn("bg-red-100 text-red-700 border-red-200 flex items-center gap-1", isFait && "opacity-60")}>
+                <Flame className="w-3 h-3" />
+                Haute
+              </Badge>
+            ) : (
+              <Badge className={cn(PRIORITY_COLORS[task.priority], isFait && "opacity-60")}>{task.priority}</Badge>
+            )}
+          </div>
+        </CardContent>
+        <CardFooter className="pt-0">
+          <div className="w-full">
+            <Label className="sr-only">Changer statut</Label>
+            <select
+              className={cn(
+                "flex h-9 w-full items-center justify-between rounded-md border px-3 py-1 text-sm shadow-sm font-medium focus:outline-none focus:ring-1 focus:ring-slate-950",
+                STATUS_COLORS[task.status],
+                isFait && "opacity-75"
+              )}
+              value={task.status}
+              onChange={(e) => handleStatusChange(task.id, e.target.value)}
+            >
+              {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </CardFooter>
+      </Card>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -388,157 +579,41 @@ function TasksContent() {
           )}
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredTasks.map(task => {
-            const isAttente = task.status === 'en attente de retour externe'
-            const isFait = task.status === 'fait'
-            const isEnCours = task.status === 'en cours'
-            const isAFaire = task.status === 'à faire'
-            const isHighPrio = task.priority === 'haute'
-            const isUrgent = isHighPrio && !isFait
+        <div className="space-y-10">
+          {/* Section 1 : Tâches actives / prioritaires (si pas sur l'onglet terminées) */}
+          {activeTab !== 'terminees' && (
+            <div>
+              {activeTasks.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 border border-dashed rounded-lg bg-slate-50/50">
+                  Toutes les tâches sélectionnées sont terminées et rangées tout en bas de page ci-dessous.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {activeTasks.map(renderTaskCard)}
+                </div>
+              )}
+            </div>
+          )}
 
-            // Styling fort pour les tâches urgentes afin qu'elles sautent immédiatement aux yeux
-            const borderClass = isUrgent 
-              ? 'border-l-[6px] border-l-red-600 border-red-300 ring-2 ring-red-400/40 shadow-md shadow-red-100/70' 
-              : isAttente 
-              ? 'border-l-4 border-amber-500' 
-              : isFait 
-              ? 'border-l-4 border-slate-200 opacity-65' 
-              : isEnCours 
-              ? 'border-l-4 border-blue-500' 
-              : 'border-l-4 border-slate-300'
-
-            const bgClass = isUrgent 
-              ? 'bg-gradient-to-br from-red-50/70 via-white to-red-50/30' 
-              : isAttente 
-              ? 'bg-amber-50/40' 
-              : isFait 
-              ? 'bg-slate-50' 
-              : 'bg-white'
-
-            return (
-              <Card key={task.id} className={cn("flex flex-col transition-all relative overflow-hidden", borderClass, bgClass)}>
-                {/* Bandeau d'alerte URGENT en haut de la carte */}
-                {isUrgent && (
-                  <div className="bg-gradient-to-r from-red-600 via-red-600 to-rose-600 text-white px-3 py-1.5 text-xs font-black shadow-xs flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <Flame className="w-4 h-4 fill-amber-300 text-amber-300 animate-pulse shrink-0" />
-                      <span>URGENT — PRIORITÉ HAUTE</span>
-                    </span>
-                    <span className="bg-red-800/90 text-white text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded">
-                      Action immédiate
-                    </span>
-                  </div>
-                )}
-
-                <CardHeader className={cn("pb-3", isUrgent ? "pt-3" : "pt-4")}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      {isFait && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
-                      {isUrgent && <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-bounce" />}
-                      <CardTitle 
-                        className={cn(
-                          "cursor-pointer text-lg hover:text-blue-600 hover:underline truncate",
-                          isUrgent && "font-black text-red-950",
-                          isFait && "line-through text-slate-500"
-                        )}
-                        onClick={() => openEditTaskDialog(task)}
-                        title={task.title}
-                      >
-                        {task.title}
-                      </CardTitle>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        title="Planifier au calendrier" 
-                        onClick={() => openScheduleDialog(task)} 
-                        className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
-                      >
-                        <Calendar className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        title="Modifier cette tâche" 
-                        onClick={() => openEditTaskDialog(task)} 
-                        className="h-8 w-8 text-slate-400 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        title="Supprimer cette tâche" 
-                        onClick={() => handleDelete(task.id)} 
-                        className="h-8 w-8 text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  
-                  {isAttente && (
-                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 border border-amber-200 w-fit">
-                      <Hourglass className="w-3.5 h-3.5" />
-                      En attente retour externe
-                    </div>
-                  )}
-                  {isFait && (
-                    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 border border-emerald-200 w-fit">
-                      Terminé
-                    </div>
-                  )}
-
-                  <CardDescription className="line-clamp-2 mt-2">
-                    {task.description ? (
-                      isAttente ? 
-                        <span className="text-amber-900 font-medium">{task.description}</span> 
-                        : isUrgent ?
-                        <span className="text-slate-800 font-medium">{task.description}</span>
-                        : task.description
-                    ) : <span className="italic text-slate-400">Aucune description</span>}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="mt-auto pb-4 space-y-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className={cn(isUrgent && "border-red-200 bg-white text-slate-800 font-semibold")}>
-                      {task.category}
-                    </Badge>
-                    {isUrgent ? (
-                      <Badge className="bg-red-600 text-white font-black flex items-center gap-1 shadow-xs border-red-700">
-                        <Flame className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-                        Haute priorité (Urgent)
-                      </Badge>
-                    ) : isHighPrio ? (
-                      <Badge className="bg-red-100 text-red-700 border-red-200 flex items-center gap-1">
-                        <Flame className="w-3 h-3" />
-                        Haute
-                      </Badge>
-                    ) : (
-                      <Badge className={cn(PRIORITY_COLORS[task.priority])}>{task.priority}</Badge>
-                    )}
-                  </div>
-                </CardContent>
-                <CardFooter className="pt-0">
-                  <div className="w-full">
-                    <Label className="sr-only">Changer statut</Label>
-                    <select
-                      className={cn(
-                        "flex h-9 w-full items-center justify-between rounded-md border px-3 py-1 text-sm shadow-sm font-medium focus:outline-none focus:ring-1 focus:ring-slate-950",
-                        STATUS_COLORS[task.status]
-                      )}
-                      value={task.status}
-                      onChange={(e) => handleStatusChange(task.id, e.target.value)}
-                    >
-                      {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                </CardFooter>
-              </Card>
-            )
-          })}
+          {/* Section 2 : Tâches terminées reléguées TOUT EN BAS de la page */}
+          {(activeTab === 'terminees' || (activeTab === 'toutes' && doneTasks.length > 0)) && (
+            <div className="pt-8 border-t border-slate-200/80 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                  <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">
+                    Tâches terminées ({doneTasks.length})
+                  </h2>
+                  <span className="text-xs text-slate-400 font-medium hidden sm:inline">
+                    — Rangées tout en bas de page pour ne pas encombrer l'espace actif
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {doneTasks.map(renderTaskCard)}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
