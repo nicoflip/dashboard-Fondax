@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 248 250 252;
+    --foreground: 15 23 42;
+  }
+  
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+}
+
+@layer components {
+  .sidebar-link {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors;
+  }
+  
+  .sidebar-link-active {
+    @apply bg-slate-700 text-white;
+  }
+  
+  .sidebar-link-inactive {
+    @apply text-slate-300 hover:bg-slate-800 hover:text-white;
+  }
+  
+  .page-header {
+    @apply text-2xl font-bold text-slate-900 mb-6;
+  }
+  
+  .card-base {
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm;
+  }
+}
+
+/* React Flow styles */
+.react-flow__node {
+  font-size: 12px;
+}
+
+.react-flow__attribution {
+  display: none !important;
+}
+
+/* FullCalendar overrides */
+.fc {
+  --fc-border-color: #e2e8f0;
+  --fc-button-bg-color: #3b82f6;
+  --fc-button-border-color: #3b82f6;
+  --fc-button-hover-bg-color: #2563eb;
+  --fc-button-hover-border-color: #2563eb;
+  --fc-button-active-bg-color: #1d4ed8;
+  --fc-button-active-border-color: #1d4ed8;
+  --fc-today-bg-color: #eff6ff;
+  font-family: inherit !important;
+}
+
+.fc .fc-button {
+  font-size: 0.8rem !important;
+  padding: 0.3rem 0.6rem !important;
+}
+
+.fc .fc-toolbar-title {
+  font-size: 1.1rem !important;
+  font-weight: 600 !important;
+}
+
+/* Tiptap editor */
+.tiptap {
+  @apply max-w-none focus:outline-none min-h-[200px] p-4 text-sm text-slate-800 leading-relaxed;
+}
+
+.tiptap p {
+  @apply mb-3;
+}
+
+.tiptap h2 {
+  @apply text-lg font-bold text-slate-900 mt-4 mb-2;
+}
+
+.tiptap h3 {
+  @apply text-base font-semibold text-slate-800 mt-3 mb-1;
+}
+
+.tiptap ul {
+  @apply list-disc list-inside space-y-1 mb-3;
+}
+
+.tiptap ol {
+  @apply list-decimal list-inside space-y-1 mb-3;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  @apply text-slate-400 float-left h-0 pointer-events-none;
+  content: attr(data-placeholder);
+}
