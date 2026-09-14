@@ -21,8 +21,11 @@ export async function middleware(request: NextRequest) {
   // User has an auth cookie: verify with Supabase with a strict 2s timeout
   let supabaseResponse = NextResponse.next({ request })
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co'
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder'
+  const DEFAULT_SUPABASE_URL = 'https://shapgbvpqbtqfycujydw.supabase.co'
+  const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNoYXBnYnZwcWJ0cWZ5Y3VqeWR3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkzNDYxMjcsImV4cCI6MjEwNDkyMjEyN30.5BKWtbNU7zUXwnDZ0njMDvPEqHy7Ms0CgSYexOfo_4M'
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY
 
   const supabase = createServerClient(
     url,
