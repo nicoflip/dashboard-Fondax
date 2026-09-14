@@ -52,16 +52,22 @@ export function Sidebar() {
 
   const NavContent = () => (
     <>
-      {/* Logo / Header */}
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-slate-700">
-        <div className="flex items-center justify-center w-9 h-9 bg-blue-600 rounded-lg">
+      {/* Logo / Header cliquable */}
+      <Link 
+        href="/" 
+        prefetch={false}
+        onClick={() => setMobileOpen(false)}
+        className="flex items-center gap-3 px-4 py-5 border-b border-slate-700 hover:bg-slate-800/80 transition-colors group cursor-pointer"
+        title="Retourner à l'accueil / menu"
+      >
+        <div className="flex items-center justify-center w-9 h-9 bg-blue-600 rounded-lg group-hover:bg-blue-500 transition-colors shadow-xs">
           <Shield className="w-5 h-5 text-white" />
         </div>
         <div>
-          <h1 className="text-base font-bold text-white">Fondax IT</h1>
+          <h1 className="text-base font-bold text-white group-hover:text-blue-300 transition-colors">Fondax IT</h1>
           <p className="text-xs text-slate-400">Dashboard</p>
         </div>
-      </div>
+      </Link>
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -107,11 +113,18 @@ export function Sidebar() {
       </aside>
 
       {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 flex items-center justify-between px-4 h-14">
-        <div className="flex items-center gap-2">
-          <Shield className="w-5 h-5 text-blue-400" />
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 flex items-center justify-between px-4 h-14 border-b border-slate-800">
+        <Link 
+          href="/" 
+          prefetch={false}
+          className="flex items-center gap-2 cursor-pointer hover:opacity-85 transition-opacity"
+          title="Retourner à l'accueil / menu"
+        >
+          <div className="flex items-center justify-center w-7 h-7 bg-blue-600 rounded-md">
+            <Shield className="w-4 h-4 text-white" />
+          </div>
           <span className="text-white font-semibold text-sm">Fondax IT</span>
-        </div>
+        </Link>
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
           className="text-white p-1"
