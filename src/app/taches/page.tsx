@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { CustomDatePicker } from '@/components/ui/date-picker'
-import { cn, TASK_CATEGORIES, TASK_STATUSES, TASK_PRIORITIES, PRIORITY_COLORS, STATUS_COLORS } from '@/lib/utils'
+import { cn, TASK_CATEGORIES, TASK_STATUSES, TASK_PRIORITIES, PRIORITY_COLORS, STATUS_COLORS, TASK_CATEGORY_COLORS } from '@/lib/utils'
 import { Task, TaskCategory, TaskPriority, TaskStatus } from '@/lib/types'
 import { Plus, Trash2, CheckCircle2, Clock, Hourglass, Flame, Pencil, Calendar, Check, AlertTriangle, Link2 } from 'lucide-react'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
@@ -514,7 +514,15 @@ function TasksContent() {
         </CardHeader>
         <CardContent className="mt-auto pb-4 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className={cn(isUrgent && "border-red-200 bg-white text-slate-800 font-semibold", isFait && "opacity-60")}>
+            <Badge 
+              variant="outline" 
+              className={cn(
+                "text-xs font-semibold border",
+                TASK_CATEGORY_COLORS[task.category] || "border-slate-200 bg-slate-50 text-slate-700",
+                isUrgent && "font-bold", 
+                isFait && "opacity-60"
+              )}
+            >
               {task.category}
             </Badge>
             {isUrgent ? (

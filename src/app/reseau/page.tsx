@@ -353,7 +353,7 @@ const EquipmentNode = React.memo(({ data, selected }: { data: any; selected?: bo
 })
 EquipmentNode.displayName = 'EquipmentNode'
 
-// Custom Translucent & Lockable Network Subnet Node with '+' equipment button
+// Custom Translucent & Lockable Network Bounding Frame Node (Englobing several devices)
 const NetworkNode = React.memo(({ id, data, selected }: { id: string; data: any; selected?: boolean }) => {
   const { lockedNetworkIds, toggleLockNetwork, openAddEquipmentForNetwork } = useContext(NetworkCanvasContext)
   const isLocked = lockedNetworkIds.has(id) || data.isLocked || false
@@ -365,43 +365,38 @@ const NetworkNode = React.memo(({ id, data, selected }: { id: string; data: any;
   const roleLow = (data.role_status || '').toLowerCase()
 
   let theme = {
-    border: 'border-purple-300/90 hover:border-purple-500 bg-purple-50/30 backdrop-blur-md text-purple-950',
-    badge: 'bg-purple-100/90 text-purple-800 border-purple-200',
-    headerBg: 'bg-purple-100/50',
-    tag: 'Réseau',
+    border: 'border-purple-400/60 hover:border-purple-500/80',
+    bg: 'bg-purple-500/10 backdrop-blur-xs',
+    headerBg: 'bg-purple-100/80 text-purple-950',
     icon: <Wifi className="w-4 h-4 text-purple-700" />
   }
 
   if (ssidLow.includes('sfr') || ssidLow.includes('fibre') || notesLow.includes('sfr')) {
     theme = {
-      border: 'border-amber-400/90 hover:border-amber-600 bg-amber-50/30 backdrop-blur-md text-amber-950',
-      badge: 'bg-amber-100/90 text-amber-900 border-amber-300',
-      headerBg: 'bg-amber-100/50',
-      tag: '⚠️ Box SFR (Parasite)',
+      border: 'border-amber-400/60 hover:border-amber-500/80',
+      bg: 'bg-amber-500/10 backdrop-blur-xs',
+      headerBg: 'bg-amber-100/80 text-amber-950',
       icon: <Router className="w-4 h-4 text-amber-700" />
     }
   } else if (ssidLow.includes('client') || roleLow.includes('invité') || notesLow.includes('vlan')) {
     theme = {
-      border: 'border-indigo-400/90 hover:border-indigo-600 bg-indigo-50/30 backdrop-blur-md text-indigo-950',
-      badge: 'bg-indigo-100/90 text-indigo-900 border-indigo-300',
-      headerBg: 'bg-indigo-100/50',
-      tag: '🛡️ VLAN Invité Isolé',
+      border: 'border-indigo-400/60 hover:border-indigo-500/80',
+      bg: 'bg-indigo-500/10 backdrop-blur-xs',
+      headerBg: 'bg-indigo-100/80 text-indigo-950',
       icon: <Shield className="w-4 h-4 text-indigo-700" />
     }
   } else if (ssidLow.includes('fondax') || roleLow.includes('prod') || roleLow.includes('interne')) {
     theme = {
-      border: 'border-emerald-400/90 hover:border-emerald-600 bg-emerald-50/30 backdrop-blur-md text-emerald-950',
-      badge: 'bg-emerald-100/90 text-emerald-900 border-emerald-300',
-      headerBg: 'bg-emerald-100/50',
-      tag: '🏢 LAN Prod & Wi-Fi',
+      border: 'border-emerald-400/60 hover:border-emerald-500/80',
+      bg: 'bg-emerald-500/10 backdrop-blur-xs',
+      headerBg: 'bg-emerald-100/80 text-emerald-950',
       icon: <Server className="w-4 h-4 text-emerald-700" />
     }
   } else if (ssidLow.includes('bureau') || notesLow.includes('deco') || notesLow.includes('mesh')) {
     theme = {
-      border: 'border-violet-400/90 hover:border-violet-600 bg-violet-50/30 backdrop-blur-md text-violet-950',
-      badge: 'bg-violet-100/90 text-violet-900 border-violet-300',
-      headerBg: 'bg-violet-100/50',
-      tag: '⚠️ Mesh Deco (Double NAT)',
+      border: 'border-violet-400/60 hover:border-violet-500/80',
+      bg: 'bg-violet-500/10 backdrop-blur-xs',
+      headerBg: 'bg-violet-100/80 text-violet-950',
       icon: <Wifi className="w-4 h-4 text-violet-700" />
     }
   }
@@ -409,39 +404,53 @@ const NetworkNode = React.memo(({ id, data, selected }: { id: string; data: any;
   return (
     <div
       className={cn(
-        "rounded-2xl border-2 border-dashed p-3.5 flex flex-col transition-all duration-200 relative select-none shadow-sm w-full h-full min-w-[200px] min-h-[120px]",
+        "rounded-3xl border-2 border-dashed transition-all duration-200 relative select-none w-full h-full flex flex-col p-3 shadow-xs",
         theme.border,
-        isLocked && "ring-2 ring-amber-400/80 border-amber-500 shadow-md",
+        theme.bg,
+        isLocked && "ring-2 ring-amber-400/70 border-amber-500/80 shadow-md",
         selected && "ring-3 ring-blue-500 border-blue-500 shadow-md",
-        isHighlighted && "ring-3 ring-purple-600 shadow-xl scale-105 z-30",
-        isDimmed && "opacity-25 grayscale scale-95 pointer-events-none"
+        isHighlighted && "ring-3 ring-purple-600 shadow-xl scale-[1.01] z-30",
+        isDimmed && "opacity-25 grayscale pointer-events-none"
       )}
     >
       <NodeResizer 
         isVisible={selected && !isLocked} 
         minWidth={200} 
-        minHeight={120}
+        minHeight={100}
         color="#9333ea"
         lineClassName="!border-purple-500"
         handleClassName="!h-2.5 !w-2.5 !bg-white !border-2 !border-purple-600 !rounded-xs shadow-xs"
       />
 
-      <Handle type="target" position={Position.Top} className="w-2.5 h-2.5 !bg-purple-500 border-2 !border-white" />
-      <Handle type="target" position={Position.Left} className="w-2.5 h-2.5 !bg-purple-500 border-2 !border-white" />
-
-      {/* Header with Title, Lock button and Add Equipment '+' button */}
-      <div className={cn("p-2 rounded-xl mb-2 flex items-center justify-between gap-1.5 border border-inherit/40", theme.headerBg)}>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <div className="p-1 rounded-md bg-white/90 shadow-2xs shrink-0">
-            {theme.icon}
+      {/* Frame Header : Network Name + IP Range + Gateway (RIEN D'AUTRE) + Controls */}
+      <div className={cn("px-3 py-1.5 rounded-2xl flex flex-wrap items-center justify-between gap-2 border border-inherit/40 shadow-2xs", theme.headerBg)}>
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 font-bold text-xs text-slate-900 shrink-0">
+            <div className="p-1 rounded-md bg-white/90 shadow-2xs">
+              {theme.icon}
+            </div>
+            <span>{data.ssid}</span>
           </div>
-          <span className="font-bold text-xs truncate text-slate-900" title={data.ssid}>
-            {data.ssid}
-          </span>
+
+          {/* Adresse réseau */}
+          {data.ip_range && (
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded-full bg-white/90 border border-slate-200/80 text-slate-800 font-semibold shadow-2xs flex items-center gap-1">
+              <span className="text-slate-400 font-normal">Réseau :</span>
+              <span>{data.ip_range}</span>
+            </span>
+          )}
+
+          {/* Passerelle / Gateway */}
+          {data.gateway && (
+            <span className="font-mono text-[11px] px-2 py-0.5 rounded-full bg-white/90 border border-slate-200/80 text-slate-800 font-medium shadow-2xs flex items-center gap-1">
+              <span className="text-slate-400 font-normal">Gateway :</span>
+              <span className="font-semibold text-slate-900">{data.gateway}</span>
+            </span>
+          )}
         </div>
 
         {/* Action buttons: Lock & Add */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
           <button
             type="button"
             onClick={(e) => {
@@ -449,12 +458,12 @@ const NetworkNode = React.memo(({ id, data, selected }: { id: string; data: any;
               toggleLockNetwork(id)
             }}
             className={cn(
-              "h-6 px-1.5 rounded-md text-[10px] font-semibold flex items-center gap-1 border transition-colors cursor-pointer",
+              "h-6 px-2 rounded-md text-[10px] font-semibold flex items-center gap-1 border transition-colors cursor-pointer",
               isLocked 
                 ? "bg-amber-600 text-white border-amber-700 shadow-xs" 
                 : "bg-white/90 text-slate-700 hover:bg-white border-slate-200"
             )}
-            title={isLocked ? "Réseau bloqué/fixe sur le plan (Cliquer pour déverrouiller)" : "Bloquer ce réseau pour qu'il ne bouge plus"}
+            title={isLocked ? "Réseau bloqué/fixe sur le plan (Cliquer pour déverrouiller)" : "Bloquer ce cadre pour qu'il ne bouge plus"}
           >
             {isLocked ? <Lock className="w-3 h-3 text-amber-100" /> : <Unlock className="w-3 h-3 text-slate-500" />}
             <span>{isLocked ? 'Fixe' : 'Mobile'}</span>
@@ -466,8 +475,8 @@ const NetworkNode = React.memo(({ id, data, selected }: { id: string; data: any;
               e.stopPropagation()
               openAddEquipmentForNetwork(data)
             }}
-            className="h-6 px-2 rounded-md text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-0.5 shadow-xs cursor-pointer transition-colors"
-            title="Ajouter un équipement à ce réseau"
+            className="h-6 px-2 rounded-md text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1 shadow-xs cursor-pointer transition-colors"
+            title="Ajouter un équipement dans ce réseau"
           >
             <Plus className="w-3 h-3" />
             <span>Ajouter</span>
@@ -475,52 +484,8 @@ const NetworkNode = React.memo(({ id, data, selected }: { id: string; data: any;
         </div>
       </div>
 
-      {/* Network Tag and Lock Status */}
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <span className={cn("text-[9px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap border", theme.badge)}>
-          {theme.tag}
-        </span>
-        {isLocked ? (
-          <span className="text-[9px] font-medium text-amber-800 bg-amber-100/90 px-1.5 py-0.5 rounded flex items-center gap-1">
-            <Lock className="w-2.5 h-2.5" /> Verrouillé
-          </span>
-        ) : (
-          <span className="text-[9px] text-slate-500 flex items-center gap-1">
-            <Unlock className="w-2.5 h-2.5" /> Déplaçable
-          </span>
-        )}
-      </div>
-
-      {/* Subnet info */}
-      <div className="space-y-1.5 my-1 bg-white/75 backdrop-blur-xs p-2.5 rounded-xl border border-inherit/40 text-xs">
-        {data.ip_range && (
-          <div className="flex items-center justify-between font-mono">
-            <span className="text-slate-500 font-medium text-[11px]">Plage IP :</span>
-            <span className="text-slate-900 font-bold text-[11px]">{data.ip_range}</span>
-          </div>
-        )}
-        {data.gateway && (
-          <div className="flex items-center justify-between font-mono">
-            <span className="text-slate-500 text-[10px]">Passerelle :</span>
-            <span className="font-semibold text-slate-800 text-[10px]">{data.gateway}</span>
-          </div>
-        )}
-        {data.manager && (
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500 text-[10px]">Géré par :</span>
-            <span className="font-semibold text-slate-700 text-[10px] truncate max-w-[120px]">{data.manager}</span>
-          </div>
-        )}
-      </div>
-
-      {data.role_status && (
-        <div className="text-[10px] text-slate-600 line-clamp-2 mt-1 px-1" title={data.role_status}>
-          {data.role_status}
-        </div>
-      )}
-
-      <Handle type="source" position={Position.Bottom} className="w-2.5 h-2.5 !bg-purple-500 border-2 !border-white" />
-      <Handle type="source" position={Position.Right} className="w-2.5 h-2.5 !bg-purple-500 border-2 !border-white" />
+      {/* Frame body container (open translucent area where enclosed devices sit) */}
+      <div className="flex-1 w-full min-h-[30px] pointer-events-none" />
     </div>
   )
 })
@@ -715,7 +680,7 @@ function computeOptimalLayout(
     })
   })
 
-  // 5. Subnet network nodes placed laterally beside their true host (zero overlap)
+  // 5. Translucent Bounding Frames for Networks (Englobing several devices)
   if (showNetworks) {
     networkList.forEach((net, idx) => {
       const netNodeId = `net-${net.id}`
@@ -724,47 +689,32 @@ function computeOptimalLayout(
       const notesLow = (net.notes || '').toLowerCase()
       const roleLow = (net.role_status || '').toLowerCase()
 
-      let netPos = { x: 1240, y: 60 + idx * 170 }
-      let targetHostId: string | undefined = undefined
-      let edgeLabel = net.ip_range ? `${net.ip_range}` : undefined
+      let netPos = { x: 1200, y: 60 + idx * 280 }
+      let frameStyle: Record<string, any> = { width: 350, height: 250 }
 
       if (ssidLow.includes('sfr') || ssidLow.includes('fibre') || notesLow.includes('sfr')) {
-        if (box) {
-          netPos = { x: 900, y: 60 }
-          targetHostId = box.id
-          edgeLabel = 'Wi-Fi Box (192.168.0.0/24)'
-        }
+        // Encompasses Box SFR Business
+        netPos = { x: 440, y: 15 }
+        frameStyle = { width: 380, height: 180 }
       } else if (ssidLow.includes('client') || roleLow.includes('invité') || notesLow.includes('vlan')) {
-        if (firewall) {
-          netPos = { x: 900, y: 230 }
-          targetHostId = firewall.id
-          edgeLabel = 'VLAN Invités (10.35.50.0/24)'
-        }
+        // Encompasses Sophos Firewall guest VLAN zone
+        netPos = { x: 440, y: 205 }
+        frameStyle = { width: 380, height: 155 }
       } else if (ssidLow.includes('fondax') || roleLow.includes('prod') || roleLow.includes('interne')) {
-        if (mainSwitch) {
-          netPos = { x: 140, y: 400 }
-          targetHostId = mainSwitch.id
-          edgeLabel = 'LAN Prod (192.168.20.0/24)'
-        } else if (firewall) {
-          netPos = { x: 140, y: 230 }
-          targetHostId = firewall.id
-          edgeLabel = 'Passerelle LAN (192.168.20.254)'
-        }
+        // Encompasses Switch, NAS, VoIP, Workstations & Printers (Production LAN)
+        netPos = { x: 80, y: 360 }
+        frameStyle = { width: 780, height: 650 }
       } else if (ssidLow.includes('bureau') || roleLow.includes('mesh') || notesLow.includes('deco')) {
-        if (deco1) {
-          netPos = { x: 1240, y: 580 }
-          targetHostId = deco1.id
-          edgeLabel = 'Mesh Deco (192.168.68.0/24)'
-        }
-      } else {
-        netPos = { x: 1240, y: 60 + idx * 170 }
-        targetHostId = firewall?.id || mainSwitch?.id
+        // Encompasses Deco 1 & Deco 2
+        netPos = { x: 860, y: 520 }
+        frameStyle = { width: 290, height: 420 }
       }
 
       nodes.push({
         id: netNodeId,
         type: 'network',
         position: netPos,
+        style: frameStyle,
         draggable: !isLocked, // disabled when locked
         data: { 
           ...net, 
@@ -772,22 +722,8 @@ function computeOptimalLayout(
           isHighlighted: false, 
           isDimmed: false 
         } as Record<string, unknown>,
-        zIndex: 8
+        zIndex: 1 // Placed behind equipment (zIndex: 10) so devices inside are easily clickable
       })
-
-      if (targetHostId) {
-        edges.push({
-          id: `edge-net-${net.id}`,
-          source: targetHostId,
-          target: netNodeId,
-          label: edgeLabel,
-          type: 'smoothstep',
-          animated: true,
-          style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '4 4' },
-          markerEnd: { type: MarkerType.ArrowClosed, color: '#a855f7' },
-          data: { isNetworkEdge: true }
-        })
-      }
     })
   }
 

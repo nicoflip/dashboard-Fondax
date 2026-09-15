@@ -1,28 +1,65 @@
 'use client'
 
-import { useState, useEffect, useRef, Suspense } from 'react'
+import React, { useState, useEffect, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
-import { CalendarEvent, Task, Vendor } from '@/lib/types'
+import { CalendarEvent, Task, Vendor, EventType, EventStatus } from '@/lib/types'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
 
 const FullCalendar = dynamic(() => import('@fullcalendar/react'), {
   ssr: false,
-  loading: () => <div className="p-8 text-center text-slate-500">Chargement du calendrier...</div>,
+  loading: () => (
+    <div className="h-[600px] flex items-center justify-center bg-slate-50/50 rounded-xl border border-slate-200 text-slate-500 font-medium">
+      <div className="flex items-center gap-2">
+        <span className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        Chargement du calendrier...
+      </div>
+    </div>
+  ),
 })
+
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent } from '@/components/ui/dialog'
 import { CustomDatePicker } from '@/components/ui/date-picker'
-import { Calendar as CalendarIcon, Plus, Trash2, Pencil, CheckCircle2, Flame, Clock, Sparkles } from 'lucide-react'
-import { EVENT_TYPES, EVENT_STATUSES, EVENT_TYPE_LABELS, formatDate, cn } from '@/lib/utils'
+import { 
+  Calendar as CalendarIcon, 
+  Plus, 
+  Trash2, 
+  Pencil, 
+  CheckCircle2, 
+  Flame, 
+  Clock, 
+  Sparkles, 
+  Phone, 
+  Users, 
+  Flag, 
+  FolderKanban, 
+  ChevronRight, 
+  Filter, 
+  CalendarDays, 
+  ListOrdered, 
+  Hourglass, 
+  Check, 
+  AlertCircle,
+  X
+} from 'lucide-react'
+import { 
+  EVENT_TYPES, 
+  EVENT_STATUSES, 
+  EVENT_TYPE_LABELS, 
+  formatDate, 
+  cn, 
+  PRIORITY_COLORS 
+} from '@/lib/utils'
 
+// Helper: parse flexible tags in description
 function parseFlexibleEvent(desc: string | null | undefined) {
   if (!desc) return { isFlexible: false, flexLabel: '', cleanDesc: '' }
   const match = desc.match(/^\[Période flexible\s*:\s*([^\]]+)\]\s*\n?([\s\S]*)$/i)
@@ -36,109 +73,150 @@ function parseFlexibleEvent(desc: string | null | undefined) {
   return { isFlexible: false, flexLabel: '', cleanDesc: desc }
 }
 
+// Helper: Format YYYY-MM-DD
+function toYMD(d: Date): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 function getExclusiveEndDate(dateStr: string) {
   const parts = dateStr.split('-').map(Number)
   if (parts.length === 3) {
     const d = new Date(parts[0], parts[1] - 1, parts[2] + 1)
-    const year = d.getFullYear()
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
+    return toYMD(d)
   }
   return dateStr
 }
 
 function getPresetDates(preset: 'two_weeks' | 'this_week' | 'next_week' | 'end_month') {
   const now = new Date()
-  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  const todayStr = toYMD(now)
 
   if (preset === 'two_weeks') {
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 14)
-    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`
+    const end = new Date(now)
+    end.setDate(now.getDate() + 14)
     return {
       label: 'Dans les 2 prochaines semaines',
       startDate: todayStr,
-      endDate: endStr
+      endDate: toYMD(end)
     }
   }
   if (preset === 'this_week') {
     const day = now.getDay()
     const diff = day === 0 ? 0 : 7 - day
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff)
-    const endStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`
+    const end = new Date(now)
+    end.setDate(now.getDate() + diff)
     return {
       label: 'Cette semaine',
       startDate: todayStr,
-      endDate: endStr
+      endDate: toYMD(end)
     }
   }
   if (preset === 'next_week') {
     const day = now.getDay()
     const daysUntilNextMonday = day === 0 ? 1 : 8 - day
-    const nextMonday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + daysUntilNextMonday)
-    const nextSunday = new Date(nextMonday.getFullYear(), nextMonday.getMonth(), nextMonday.getDate() + 6)
-    const startStr = `${nextMonday.getFullYear()}-${String(nextMonday.getMonth() + 1).padStart(2, '0')}-${String(nextMonday.getDate()).padStart(2, '0')}`
-    const endStr = `${nextSunday.getFullYear()}-${String(nextSunday.getMonth() + 1).padStart(2, '0')}-${String(nextSunday.getDate()).padStart(2, '0')}`
+    const nextMonday = new Date(now)
+    nextMonday.setDate(now.getDate() + daysUntilNextMonday)
+    const nextSunday = new Date(nextMonday)
+    nextSunday.setDate(nextMonday.getDate() + 6)
     return {
       label: 'Semaine prochaine',
-      startDate: startStr,
-      endDate: endStr
+      startDate: toYMD(nextMonday),
+      endDate: toYMD(nextSunday)
     }
   }
   if (preset === 'end_month') {
     const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-    const endStr = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
     return {
       label: "D'ici fin du mois",
       startDate: todayStr,
-      endDate: endStr
+      endDate: toYMD(lastDay)
     }
   }
   return { label: 'Dans les 2 prochaines semaines', startDate: todayStr, endDate: todayStr }
 }
 
-function CalendrierContent() {
+// Event Type Metadata (Colors & Icons)
+const EVENT_TYPE_CONFIG: Record<string, { label: string; icon: any; colorBg: string; colorText: string; colorBorder: string; hex: string }> = {
+  rdv: {
+    label: 'Rendez-vous',
+    icon: Users,
+    colorBg: 'bg-blue-50',
+    colorText: 'text-blue-700',
+    colorBorder: 'border-blue-200',
+    hex: '#2563eb'
+  },
+  appel: {
+    label: 'Appel téléphonique',
+    icon: Phone,
+    colorBg: 'bg-emerald-50',
+    colorText: 'text-emerald-700',
+    colorBorder: 'border-emerald-200',
+    hex: '#059669'
+  },
+  'échéance': {
+    label: 'Échéance',
+    icon: Flag,
+    colorBg: 'bg-rose-50',
+    colorText: 'text-rose-700',
+    colorBorder: 'border-rose-200',
+    hex: '#e11d48'
+  },
+  'étape chantier': {
+    label: 'Étape chantier',
+    icon: FolderKanban,
+    colorBg: 'bg-indigo-50',
+    colorText: 'text-indigo-700',
+    colorBorder: 'border-indigo-200',
+    hex: '#6366f1'
+  }
+}
+
+function CalendrierInner() {
   const supabase = createClient()
   const searchParams = useSearchParams()
   const urlFilter = searchParams.get('filter')
-  const listRef = useRef<HTMLDivElement>(null)
 
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [loading, setLoading] = useState(true)
-  const [eventFilter, setEventFilter] = useState<'TOUS' | 'A_VENIR' | 'PASSE'>('TOUS')
-  
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [isEditOpen, setIsEditOpen] = useState(false)
-  
-  const [selectedDate, setSelectedDate] = useState<string>('')
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null)
-  
-  // Form states
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [eventDate, setEventDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  const [isFlexible, setIsFlexible] = useState(false)
-  const [flexLabel, setFlexLabel] = useState('Dans les 2 prochaines semaines')
-  const [eventType, setEventType] = useState('intervention')
-  const [status, setStatus] = useState('à venir')
-  const [taskId, setTaskId] = useState('')
-  const [vendorId, setVendorId] = useState('')
+
+  // View mode: 'calendar' | 'agenda' | 'flexible'
+  const [activeTab, setActiveTab] = useState<'calendar' | 'agenda' | 'flexible'>('calendar')
+  const [calendarViewMode, setCalendarViewMode] = useState<'dayGridMonth' | 'dayGridWeek'>('dayGridMonth')
+
+  // Filters
+  const [typeFilter, setTypeFilter] = useState<string>('TOUS')
+  const [statusFilter, setStatusFilter] = useState<string>('TOUS')
+
+  // Selected date on calendar click
+  const [selectedDayDate, setSelectedDayDate] = useState<string>(() => toYMD(new Date()))
+
+  // Dialog state (Unified Add/Edit)
+  const [isDialogOpen, setIsDialogOpen] = useState(false)
+  const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null)
+
+  // Dialog form state
+  const [formTitle, setFormTitle] = useState('')
+  const [formDescription, setFormDescription] = useState('')
+  const [formEventDate, setFormEventDate] = useState('')
+  const [formEndDate, setFormEndDate] = useState('')
+  const [formIsFlexible, setFormIsFlexible] = useState(false)
+  const [formFlexLabel, setFormFlexLabel] = useState('Dans les 2 prochaines semaines')
+  const [formEventType, setFormEventType] = useState<EventType>('rdv')
+  const [formStatus, setFormStatus] = useState<EventStatus>('à venir')
+  const [formTaskId, setFormTaskId] = useState('')
+  const [formVendorId, setFormVendorId] = useState('')
 
   useEffect(() => {
     if (urlFilter === 'a_venir') {
-      setEventFilter('A_VENIR')
-      setTimeout(() => {
-        listRef.current?.scrollIntoView({ behavior: 'smooth' })
-      }, 400)
+      setStatusFilter('à venir')
+      setActiveTab('agenda')
     }
   }, [urlFilter])
-
-  useEffect(() => {
-    fetchEvents()
-  }, [])
 
   const fetchEvents = async () => {
     setLoading(true)
@@ -154,781 +232,1064 @@ function CalendrierContent() {
     setLoading(false)
   }
 
-  const handleDateClick = (arg: any) => {
-    resetForm()
-    setEventDate(arg.dateStr)
-    setSelectedDate(arg.dateStr)
-    setIsAddOpen(true)
+  useEffect(() => {
+    fetchEvents()
+  }, [])
+
+  // Open Add Dialog
+  const handleOpenAdd = (defaultDate?: string) => {
+    setEditingEvent(null)
+    setFormTitle('')
+    setFormDescription('')
+    const dateToSet = defaultDate || selectedDayDate || toYMD(new Date())
+    setFormEventDate(dateToSet)
+    setFormEndDate('')
+    setFormIsFlexible(false)
+    setFormFlexLabel('Dans les 2 prochaines semaines')
+    setFormEventType('rdv')
+    setFormStatus('à venir')
+    setFormTaskId('')
+    setFormVendorId('')
+    setIsDialogOpen(true)
   }
 
-  const handleEventClick = (arg: any) => {
+  // Open Edit Dialog
+  const handleOpenEdit = (event: CalendarEvent) => {
+    setEditingEvent(event)
+    setFormTitle(event.title)
+    const parsed = parseFlexibleEvent(event.description)
+    if (parsed.isFlexible) {
+      setFormIsFlexible(true)
+      setFormFlexLabel(parsed.flexLabel)
+      setFormDescription(parsed.cleanDesc)
+    } else {
+      setFormIsFlexible(false)
+      setFormFlexLabel('Dans les 2 prochaines semaines')
+      setFormDescription(event.description || '')
+    }
+    setFormEventDate(event.event_date.split('T')[0])
+    setFormEndDate(event.end_date ? event.end_date.split('T')[0] : '')
+    setFormEventType(event.event_type)
+    setFormStatus(event.status)
+    setFormTaskId(event.task_id || '')
+    setFormVendorId(event.vendor_id || '')
+    setIsDialogOpen(true)
+  }
+
+  // Auto-fill title from task if empty
+  const handleSelectTask = (tid: string) => {
+    setFormTaskId(tid)
+    if (tid && !formTitle) {
+      const t = tasks.find(item => item.id === tid)
+      if (t) {
+        setFormTitle(t.title)
+        if (!formDescription && t.description) setFormDescription(t.description)
+      }
+    }
+  }
+
+  // Save (Insert or Update)
+  const handleSaveEvent = async () => {
+    if (!formTitle.trim() || !formEventDate) return
+
+    let finalEndDate = formEndDate || null
+    if (formIsFlexible && !finalEndDate && formEventDate) {
+      const d = new Date(formEventDate)
+      d.setDate(d.getDate() + 14)
+      finalEndDate = toYMD(d)
+    }
+
+    const finalDesc = formIsFlexible
+      ? `[Période flexible : ${formFlexLabel || 'Dans les 2 prochaines semaines'}]\n${formDescription}`.trim()
+      : formDescription.trim()
+
+    const payload = {
+      title: formTitle.trim(),
+      description: finalDesc || null,
+      event_date: formEventDate,
+      end_date: finalEndDate,
+      event_type: formEventType,
+      status: formStatus,
+      task_id: formTaskId || null,
+      vendor_id: formVendorId || null
+    }
+
+    if (editingEvent) {
+      const { error } = await supabase.from('events').update(payload).eq('id', editingEvent.id)
+      if (!error) {
+        setIsDialogOpen(false)
+        fetchEvents()
+      }
+    } else {
+      const { error } = await supabase.from('events').insert([payload])
+      if (!error) {
+        setIsDialogOpen(false)
+        fetchEvents()
+      }
+    }
+  }
+
+  // Delete event
+  const handleDeleteEvent = async (id: string, titleStr: string) => {
+    if (!window.confirm(`Supprimer l'événement "${titleStr}" ?`)) return
+    const { error } = await supabase.from('events').delete().eq('id', id)
+    if (!error) {
+      if (editingEvent?.id === id) setIsDialogOpen(false)
+      fetchEvents()
+    }
+  }
+
+  // Change event status directly
+  const handleStatusChange = async (event: CalendarEvent, newStatus: EventStatus) => {
+    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, status: newStatus } : e))
+    await supabase.from('events').update({ status: newStatus }).eq('id', event.id)
+  }
+
+  // FullCalendar event click & date click
+  const handleFcDateClick = (arg: any) => {
+    setSelectedDayDate(arg.dateStr)
+  }
+
+  const handleFcEventClick = (arg: any) => {
     const event = events.find(e => e.id === arg.event.id)
     if (event) {
-      setSelectedEvent(event)
-      setTitle(event.title)
-      const parsed = parseFlexibleEvent(event.description)
-      if (parsed.isFlexible) {
-        setIsFlexible(true)
-        setFlexLabel(parsed.flexLabel)
-        setDescription(parsed.cleanDesc)
-      } else {
-        setIsFlexible(false)
-        setFlexLabel('Dans les 2 prochaines semaines')
-        setDescription(event.description || '')
-      }
-      setEventDate(event.event_date.split('T')[0])
-      setEndDate(event.end_date ? event.end_date.split('T')[0] : '')
-      setEventType(event.event_type)
-      setStatus(event.status)
-      setTaskId(event.task_id || '')
-      setVendorId(event.vendor_id || '')
-      setIsEditOpen(true)
+      handleOpenEdit(event)
     }
   }
 
-  const resetForm = () => {
-    setTitle('')
-    setDescription('')
-    setEventDate('')
-    setEndDate('')
-    setIsFlexible(false)
-    setFlexLabel('Dans les 2 prochaines semaines')
-    setEventType('intervention')
-    setStatus('à venir')
-    setTaskId('')
-    setVendorId('')
-    setSelectedEvent(null)
-  }
+  // Filtered events
+  const filteredEvents = useMemo(() => {
+    return events.filter(e => {
+      if (typeFilter !== 'TOUS' && e.event_type !== typeFilter) return false
+      if (statusFilter !== 'TOUS' && e.status !== statusFilter) return false
+      return true
+    })
+  }, [events, typeFilter, statusFilter])
 
-  const handleSelectTaskForEvent = (selectedTid: string) => {
-    setTaskId(selectedTid)
-    if (selectedTid) {
-      const t = tasks.find(tsk => tsk.id === selectedTid)
-      if (t) {
-        if (!title) setTitle(t.title)
-        if (!description && t.description) setDescription(t.description)
-      }
-    }
-  }
-
-  const handleAdd = async () => {
-    let finalEndDate = endDate || null
-    if (isFlexible && !finalEndDate && eventDate) {
-      const d = new Date(eventDate)
-      d.setDate(d.getDate() + 14)
-      finalEndDate = d.toISOString().split('T')[0]
-    }
-    const finalDesc = isFlexible
-      ? `[Période flexible : ${flexLabel || 'Dans les 2 prochaines semaines'}]\n${description}`.trim()
-      : description
-
-    const { error } = await supabase.from('events').insert([
-      {
-        title,
-        description: finalDesc,
-        event_date: eventDate,
-        end_date: finalEndDate,
-        event_type: eventType,
-        status,
-        task_id: taskId || null,
-        vendor_id: vendorId || null
-      }
-    ])
-    if (!error) {
-      setIsAddOpen(false)
-      fetchEvents()
-    }
-  }
-
-  const handleUpdate = async () => {
-    if (!selectedEvent) return
-    let finalEndDate = endDate || null
-    if (isFlexible && !finalEndDate && eventDate) {
-      const d = new Date(eventDate)
-      d.setDate(d.getDate() + 14)
-      finalEndDate = d.toISOString().split('T')[0]
-    }
-    const finalDesc = isFlexible
-      ? `[Période flexible : ${flexLabel || 'Dans les 2 prochaines semaines'}]\n${description}`.trim()
-      : description
-
-    const { error } = await supabase
-      .from('events')
-      .update({
-        title,
-        description: finalDesc,
-        event_date: eventDate,
-        end_date: finalEndDate,
-        event_type: eventType,
-        status,
-        task_id: taskId || null,
-        vendor_id: vendorId || null
-      })
-      .eq('id', selectedEvent.id)
+  // FullCalendar event items mapping
+  const calendarEvents = useMemo(() => {
+    return filteredEvents.map(e => {
+      const parsed = parseFlexibleEvent(e.description)
+      const conf = EVENT_TYPE_CONFIG[e.event_type] || EVENT_TYPE_CONFIG.rdv
       
-    if (!error) {
-      setIsEditOpen(false)
-      fetchEvents()
-    }
-  }
+      let color = conf.hex
+      if (e.status === 'passé') color = '#94a3b8'
+      else if (parsed.isFlexible) color = '#8b5cf6'
+      else if (e.status === 'en attente') color = '#f59e0b'
 
-  const handleDelete = async () => {
-    if (!selectedEvent) return
-    if (!window.confirm('Voulez-vous supprimer cet événement du calendrier ?')) return
-    const { error } = await supabase
-      .from('events')
-      .delete()
-      .eq('id', selectedEvent.id)
-      
-    if (!error) {
-      setIsEditOpen(false)
-      fetchEvents()
-    }
-  }
+      const startDate = e.event_date.split('T')[0]
+      const hasEndDate = !!e.end_date
 
-  const calendarEvents = events.map(e => {
-    const parsed = parseFlexibleEvent(e.description)
-    let color = '#3b82f6' // à venir (blue)
-    if (e.status === 'passé') color = '#94a3b8' // gray
-    else if (parsed.isFlexible) color = '#8b5cf6' // purple for flexible!
-    else if (e.status === 'en attente') color = '#f59e0b' // amber
-    
-    const startDate = e.event_date.split('T')[0]
-    const hasEndDate = !!e.end_date
-    const displayTitle = parsed.isFlexible 
-      ? `⏳ ${e.title} (~ ${parsed.flexLabel})`
-      : e.title
-
-    if (hasEndDate && e.end_date) {
-      const exclusiveEnd = getExclusiveEndDate(e.end_date.split('T')[0])
       return {
         id: e.id,
-        title: displayTitle,
+        title: parsed.isFlexible ? `⏳ ${e.title}` : e.title,
         start: startDate,
-        end: exclusiveEnd,
+        end: hasEndDate && e.end_date ? getExclusiveEndDate(e.end_date.split('T')[0]) : undefined,
         allDay: true,
         backgroundColor: color,
-        borderColor: color
+        borderColor: color,
+        extendedProps: {
+          eventType: e.event_type,
+          status: e.status,
+          isFlexible: parsed.isFlexible,
+          flexLabel: parsed.flexLabel
+        }
       }
+    })
+  }, [filteredEvents])
+
+  // Events for selected day
+  const eventsForSelectedDay = useMemo(() => {
+    if (!selectedDayDate) return []
+    return events.filter(e => {
+      const s = e.event_date.split('T')[0]
+      const end = e.end_date ? e.end_date.split('T')[0] : s
+      return selectedDayDate >= s && selectedDayDate <= end
+    })
+  }, [events, selectedDayDate])
+
+  // KPIs
+  const todayYMD = toYMD(new Date())
+  const todayCount = events.filter(e => e.event_date.startsWith(todayYMD)).length
+  const now = new Date()
+  const weekStart = new Date(now)
+  weekStart.setDate(now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1))
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekStart.getDate() + 6)
+  const weekStartYMD = toYMD(weekStart)
+  const weekEndYMD = toYMD(weekEnd)
+
+  const thisWeekCount = events.filter(e => {
+    const d = e.event_date.split('T')[0]
+    return d >= weekStartYMD && d <= weekEndYMD
+  }).length
+
+  const flexibleCount = events.filter(e => parseFlexibleEvent(e.description).isFlexible).length
+  const pendingCount = events.filter(e => e.status === 'en attente').length
+
+  // Chronological grouping for Agenda view
+  const agendaGroups = useMemo(() => {
+    const today = new Date(new Date().setHours(0, 0, 0, 0))
+    const tomorrow = new Date(today)
+    tomorrow.setDate(today.getDate() + 1)
+    const nextWeekDate = new Date(today)
+    nextWeekDate.setDate(today.getDate() + 7)
+
+    const groups: {
+      today: CalendarEvent[]
+      tomorrow: CalendarEvent[]
+      thisWeek: CalendarEvent[]
+      nextWeek: CalendarEvent[]
+      later: CalendarEvent[]
+      past: CalendarEvent[]
+    } = {
+      today: [],
+      tomorrow: [],
+      thisWeek: [],
+      nextWeek: [],
+      later: [],
+      past: []
     }
 
-    return {
-      id: e.id,
-      title: displayTitle,
-      date: startDate,
-      allDay: true,
-      backgroundColor: color,
-      borderColor: color
-    }
-  })
+    filteredEvents.forEach(e => {
+      const eDate = new Date(e.event_date + 'T00:00:00')
+      if (eDate < today) {
+        groups.past.push(e)
+      } else if (toYMD(eDate) === toYMD(today)) {
+        groups.today.push(e)
+      } else if (toYMD(eDate) === toYMD(tomorrow)) {
+        groups.tomorrow.push(e)
+      } else if (eDate <= nextWeekDate) {
+        groups.thisWeek.push(e)
+      } else {
+        groups.later.push(e)
+      }
+    })
 
-  const today = new Date(new Date().setHours(0,0,0,0))
-  const upcomingEvents = events.filter(e => new Date(e.event_date) >= today)
-  const pastEvents = events.filter(e => new Date(e.event_date) < today)
-  const displayedEvents = eventFilter === 'A_VENIR' ? upcomingEvents : eventFilter === 'PASSE' ? pastEvents : events
+    return groups
+  }, [filteredEvents])
+
+  // Custom FullCalendar event render
+  const renderEventContent = (eventInfo: any) => {
+    const type = eventInfo.event.extendedProps.eventType
+    const isFlex = eventInfo.event.extendedProps.isFlexible
+    const conf = EVENT_TYPE_CONFIG[type] || EVENT_TYPE_CONFIG.rdv
+    const IconComponent = conf.icon
+
+    return (
+      <div 
+        className="flex items-center gap-1 overflow-hidden px-1.5 py-0.5 text-[11px] font-medium leading-tight select-none cursor-pointer"
+        title={eventInfo.event.title}
+      >
+        {isFlex ? (
+          <Hourglass className="w-3 h-3 shrink-0 text-amber-200" />
+        ) : (
+          <IconComponent className="w-3 h-3 shrink-0 opacity-80" />
+        )}
+        <span className="truncate">{eventInfo.event.title}</span>
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold tracking-tight">Calendrier</h1>
-        <Button onClick={() => { resetForm(); setEventDate(new Date().toISOString().split('T')[0]); setIsAddOpen(true); }} className="cursor-pointer">
-          <Plus className="mr-2 h-4 w-4" /> Nouvel événement
+    <div className="space-y-6 pb-12">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
+              <CalendarDays className="w-6 h-6" />
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">
+              Calendrier & Agenda IT
+            </h1>
+          </div>
+          <p className="text-sm text-slate-500">
+            Gestion visuelle des rendez-vous, échéances, interventions prestataires et jalons
+          </p>
+        </div>
+
+        <Button
+          onClick={() => handleOpenAdd()}
+          className="bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer flex items-center gap-2 self-start sm:self-auto"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Nouvel événement</span>
         </Button>
       </div>
 
-      <Card>
-        <CardContent className="p-6">
-          <FullCalendar
-            plugins={[dayGridPlugin, interactionPlugin]}
-            initialView="dayGridMonth"
-            locale="fr"
-            firstDay={1}
-            buttonText={{
-              today: "Aujourd'hui",
-              month: 'Mois',
-              week: 'Semaine'
-            }}
-            headerToolbar={{
-              left: 'prev,next today',
-              center: 'title',
-              right: ''
-            }}
-            events={calendarEvents}
-            dateClick={handleDateClick}
-            eventClick={handleEventClick}
-            height="auto"
-          />
-        </CardContent>
-      </Card>
-
-      <div ref={listRef} className="space-y-4 pt-2">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
-            {eventFilter === 'A_VENIR' ? 'Événements à venir' : eventFilter === 'PASSE' ? 'Événements passés' : 'Tous les événements'}
-          </h2>
-
-          {/* Filtres d'affichage */}
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setEventFilter('TOUS')}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
-                eventFilter === 'TOUS' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              )}
-            >
-              Tous ({events.length})
-            </button>
-            <button
-              onClick={() => setEventFilter('A_VENIR')}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs",
-                eventFilter === 'A_VENIR' ? "bg-purple-600 text-white ring-2 ring-purple-300" : "bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200"
-              )}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              À venir uniquement ({upcomingEvents.length})
-            </button>
-            <button
-              onClick={() => setEventFilter('PASSE')}
-              className={cn(
-                "px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
-                eventFilter === 'PASSE' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              )}
-            >
-              Passés ({pastEvents.length})
-            </button>
+      {/* KPI Cards Bar */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Aujourd'hui</p>
+            <p className="text-2xl font-bold text-slate-900 mt-0.5">{todayCount}</p>
+          </div>
+          <div className="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+            <CalendarIcon className="w-5 h-5" />
           </div>
         </div>
 
-        {loading ? (
-          <p className="text-slate-500">Chargement...</p>
-        ) : displayedEvents.length === 0 ? (
-          <p className="text-muted-foreground">Aucun événement ne correspond à ce filtre.</p>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {displayedEvents.map(event => {
-              const typeLabel = EVENT_TYPE_LABELS[event.event_type] || event.event_type
-              const isPastEvent = event.status === 'passé'
-              const linkedTask = tasks.find(t => t.id === event.task_id)
-              const linkedVendor = vendors.find(v => v.id === event.vendor_id)
-              const isLinkedUrgent = linkedTask?.priority === 'haute'
-              const parsed = parseFlexibleEvent(event.description)
-
-              const borderClass = isLinkedUrgent 
-                ? 'border-l-[5px] border-l-red-600 border-red-200 bg-red-50/20' 
-                : isPastEvent 
-                ? 'border-l-4 border-l-slate-400' 
-                : parsed.isFlexible
-                ? 'border-l-[5px] border-l-purple-500 bg-purple-50/20'
-                : event.status === 'en attente' 
-                ? 'border-l-4 border-l-amber-500' 
-                : 'border-l-4 border-l-blue-500'
-
-              return (
-                <Card 
-                  key={event.id} 
-                  className={`${borderClass} cursor-pointer hover:shadow-sm transition-all`} 
-                  onClick={() => handleEventClick({event: {id: event.id}})}
-                >
-                  <CardHeader className="pb-2">
-                    <div className="flex justify-between items-start gap-2">
-                      <div className="flex-1 min-w-0">
-                        <CardTitle className="text-base truncate flex items-center gap-1.5" title={event.title}>
-                          {parsed.isFlexible && <span className="text-purple-600 text-sm">⏳</span>}
-                          <span>{event.title}</span>
-                        </CardTitle>
-                        <div className="text-xs text-slate-500 flex items-center mt-1">
-                          <CalendarIcon className={cn("mr-1.5 h-3.5 w-3.5", parsed.isFlexible ? "text-purple-600" : "text-slate-400")} />
-                          {parsed.isFlexible && event.end_date ? (
-                            <span className="font-semibold text-purple-900">
-                              Entre le {formatDate(event.event_date)} et le {formatDate(event.end_date)}
-                            </span>
-                          ) : (
-                            <span>{formatDate(event.event_date)}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        {parsed.isFlexible && (
-                          <Badge className="text-[10px] bg-purple-100 text-purple-800 border border-purple-300 font-semibold flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-purple-600" />
-                            {parsed.flexLabel}
-                          </Badge>
-                        )}
-                        <Badge variant={isPastEvent ? "secondary" : "default"} className="text-xs">{typeLabel}</Badge>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Modifier cet événement"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleEventClick({ event: { id: event.id } })
-                          }}
-                          className="h-7 w-7 text-slate-400 hover:text-blue-600 cursor-pointer"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Supprimer cet événement"
-                          onClick={async (e) => {
-                            e.stopPropagation()
-                            if (window.confirm('Voulez-vous supprimer cet événement ?')) {
-                              await supabase.from('events').delete().eq('id', event.id)
-                              fetchEvents()
-                            }
-                          }}
-                          className="h-7 w-7 text-slate-400 hover:text-red-600 cursor-pointer"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {parsed.cleanDesc && (
-                      <p className="text-sm text-slate-700 line-clamp-2">{parsed.cleanDesc}</p>
-                    )}
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {linkedTask && (
-                        isLinkedUrgent ? (
-                          <Badge className="text-[11px] bg-red-600 text-white font-bold flex items-center gap-1 shadow-xs border-red-700">
-                            <Flame className="w-3 h-3 fill-amber-300 text-amber-300" />
-                            Tâche urgente : {linkedTask.title}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-800 border-blue-200">
-                            Tâche : {linkedTask.title}
-                          </Badge>
-                        )
-                      )}
-                      {linkedVendor && (
-                        <Badge variant="outline" className="text-[11px] bg-amber-50 text-amber-800 border-amber-200">
-                          Prestataire : {linkedVendor.name}
-                        </Badge>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Cette semaine</p>
+            <p className="text-2xl font-bold text-slate-900 mt-0.5">{thisWeekCount}</p>
           </div>
-        )}
+          <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+            <Clock className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Dates flexibles</p>
+            <p className="text-2xl font-bold text-purple-700 mt-0.5">{flexibleCount}</p>
+          </div>
+          <div className="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
+            <Hourglass className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">En attente</p>
+            <p className="text-2xl font-bold text-amber-700 mt-0.5">{pendingCount}</p>
+          </div>
+          <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+            <AlertCircle className="w-5 h-5" />
+          </div>
+        </div>
       </div>
 
-      {/* Dialog: Ajouter un événement */}
-      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Ajouter un événement au calendrier</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Lier à une tâche IT existante (optionnel)</Label>
-              <select
-                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
-                value={taskId}
-                onChange={e => handleSelectTaskForEvent(e.target.value)}
+      {/* Control Bar: View Switcher Tabs & Filters */}
+      <Card className="border-slate-200 shadow-2xs">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            {/* View Switcher Tabs */}
+            <div className="flex items-center p-1 bg-slate-100 rounded-lg self-start">
+              <button
+                type="button"
+                onClick={() => setActiveTab('calendar')}
+                className={cn(
+                  "px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer",
+                  activeTab === 'calendar'
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                )}
               >
-                <option value="">-- Aucune tâche liée --</option>
-                {tasks.map(t => (
-                  <option key={t.id} value={t.id}>
-                    [{t.category}] {t.title} ({t.status})
-                  </option>
-                ))}
-              </select>
+                <CalendarDays className="w-3.5 h-3.5 text-blue-600" />
+                <span>Calendrier</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('agenda')}
+                className={cn(
+                  "px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer",
+                  activeTab === 'agenda'
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-600 hover:text-slate-900"
+                )}
+              >
+                <ListOrdered className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Planning & Agenda</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('flexible')}
+                className={cn(
+                  "px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer",
+                  activeTab === 'flexible'
+                    ? "bg-white text-purple-800 shadow-xs"
+                    : "text-slate-600 hover:text-purple-700"
+                )}
+              >
+                <Hourglass className="w-3.5 h-3.5 text-purple-600" />
+                <span>Dates Flexibles ({flexibleCount})</span>
+              </button>
             </div>
 
-            <div className="space-y-2">
-              <Label>Titre de l'événement <span className="text-red-500">*</span></Label>
-              <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Titre de l'événement" />
-            </div>
-
-            {/* Sélecteur de date flexible ou date fixe */}
-            <div className="rounded-xl border border-purple-200 bg-purple-50/40 p-3.5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-purple-600" />
-                  <span className="text-sm font-semibold text-purple-950">Mode Date Flexible</span>
+            {/* In Calendar Tab: Month / Week view toggle */}
+            {activeTab === 'calendar' && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-medium">Affichage :</span>
+                <div className="flex items-center p-0.5 bg-slate-100 rounded-md">
+                  <button
+                    type="button"
+                    onClick={() => setCalendarViewMode('dayGridMonth')}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-medium rounded cursor-pointer transition-colors",
+                      calendarViewMode === 'dayGridMonth' ? "bg-white text-slate-900 shadow-2xs font-semibold" : "text-slate-500 hover:text-slate-900"
+                    )}
+                  >
+                    Mois
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCalendarViewMode('dayGridWeek')}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-medium rounded cursor-pointer transition-colors",
+                      calendarViewMode === 'dayGridWeek' ? "bg-white text-slate-900 shadow-2xs font-semibold" : "text-slate-500 hover:text-slate-900"
+                    )}
+                  >
+                    Semaine
+                  </button>
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Filter Pills (Type & Status) */}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+            {/* Filter by Type */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-slate-400 font-semibold mr-1 flex items-center gap-1">
+                <Filter className="w-3 h-3" /> Type :
+              </span>
+              <button
+                type="button"
+                onClick={() => setTypeFilter('TOUS')}
+                className={cn(
+                  "px-2.5 py-1 rounded-full font-medium transition-colors cursor-pointer",
+                  typeFilter === 'TOUS' ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                )}
+              >
+                Tous ({events.length})
+              </button>
+              {EVENT_TYPES.map(t => {
+                const conf = EVENT_TYPE_CONFIG[t] || EVENT_TYPE_CONFIG.rdv
+                const Icon = conf.icon
+                const count = events.filter(e => e.event_type === t).length
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTypeFilter(t)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-full font-medium transition-all flex items-center gap-1 cursor-pointer",
+                      typeFilter === t
+                        ? `${conf.colorBg} ${conf.colorText} border ${conf.colorBorder} font-bold shadow-2xs`
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    )}
+                  >
+                    <Icon className="w-3 h-3" />
+                    <span>{conf.label}</span>
+                    <span className="opacity-60 text-[10px]">({count})</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Filter by Status */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-slate-400 font-semibold mr-1">Statut :</span>
+              {['TOUS', 'à venir', 'en attente', 'passé'].map(st => (
                 <button
+                  key={st}
                   type="button"
-                  onClick={() => {
-                    if (!isFlexible) {
-                      const p = getPresetDates('two_weeks')
-                      setEventDate(p.startDate)
-                      setEndDate(p.endDate)
-                      setFlexLabel(p.label)
-                      setIsFlexible(true)
-                    } else {
-                      setIsFlexible(false)
-                    }
-                  }}
+                  onClick={() => setStatusFilter(st)}
                   className={cn(
-                    "px-3 py-1 text-xs font-semibold rounded-full border transition-all cursor-pointer",
-                    isFlexible 
-                      ? "bg-purple-600 text-white border-purple-600 shadow-xs" 
-                      : "bg-white text-slate-600 border-slate-300 hover:bg-slate-100"
+                    "px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer capitalize",
+                    statusFilter === st ? "bg-blue-600 text-white font-semibold shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   )}
                 >
-                  {isFlexible ? "✓ Flexible activé" : "Activer date flexible"}
+                  {st === 'TOUS' ? 'Tous' : st}
                 </button>
-              </div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-              {isFlexible ? (
-                <div className="space-y-3 pt-1 border-t border-purple-200/60">
-                  <p className="text-xs text-purple-700">
-                    💡 Date exacte inconnue ? Définissez une période estimée (ex: dans les 2 prochaines semaines).
+      {/* TAB 1: INTERACTIVE CALENDAR VIEW WITH RIGHT-SIDE QUICK FOCUS */}
+      {activeTab === 'calendar' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          {/* Calendar Area (8 cols on desktop) */}
+          <div className="lg:col-span-8">
+            <Card className="border-slate-200 shadow-sm overflow-hidden bg-white">
+              <CardContent className="p-4 sm:p-5">
+                <FullCalendar
+                  key={calendarViewMode}
+                  plugins={[dayGridPlugin, interactionPlugin]}
+                  initialView={calendarViewMode}
+                  locale="fr"
+                  firstDay={1}
+                  buttonText={{
+                    today: "Aujourd'hui",
+                    month: 'Mois',
+                    week: 'Semaine'
+                  }}
+                  headerToolbar={{
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: ''
+                  }}
+                  events={calendarEvents}
+                  eventContent={renderEventContent}
+                  dateClick={handleFcDateClick}
+                  eventClick={handleFcEventClick}
+                  height="auto"
+                />
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right Side Panel: Day Focus & Upcoming events (4 cols on desktop) */}
+          <div className="lg:col-span-4 space-y-4">
+            {/* Selected Day Focus Card */}
+            <Card className="border-blue-200 bg-blue-50/30 shadow-2xs">
+              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-blue-700 uppercase tracking-wider">
+                    Jour sélectionné
+                  </span>
+                  <CardTitle className="text-base font-bold text-slate-900 mt-0.5">
+                    {formatDate(selectedDayDate)}
+                  </CardTitle>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => handleOpenAdd(selectedDayDate)}
+                  className="h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white cursor-pointer flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Ajouter</span>
+                </Button>
+              </CardHeader>
+
+              <CardContent className="p-4 pt-2">
+                {eventsForSelectedDay.length === 0 ? (
+                  <p className="text-xs text-slate-500 py-3 text-center italic">
+                    Aucun événement prévu à cette date.
                   </p>
+                ) : (
+                  <div className="space-y-2">
+                    {eventsForSelectedDay.map(ev => {
+                      const conf = EVENT_TYPE_CONFIG[ev.event_type] || EVENT_TYPE_CONFIG.rdv
+                      const Icon = conf.icon
+                      const parsed = parseFlexibleEvent(ev.description)
 
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs font-medium text-slate-500 mr-1">Raccourcis :</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const p = getPresetDates('two_weeks')
-                        setEventDate(p.startDate)
-                        setEndDate(p.endDate)
-                        setFlexLabel(p.label)
-                      }}
-                      className="text-xs px-2.5 py-1 rounded bg-white hover:bg-purple-100 border border-purple-300 text-purple-800 font-semibold cursor-pointer shadow-xs transition-colors"
-                    >
-                      ⚡ Dans les 2 prochaines semaines
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const p = getPresetDates('this_week')
-                        setEventDate(p.startDate)
-                        setEndDate(p.endDate)
-                        setFlexLabel(p.label)
-                      }}
-                      className="text-xs px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
-                    >
-                      Cette semaine
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const p = getPresetDates('next_week')
-                        setEventDate(p.startDate)
-                        setEndDate(p.endDate)
-                        setFlexLabel(p.label)
-                      }}
-                      className="text-xs px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
-                    >
-                      Semaine prochaine
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const p = getPresetDates('end_month')
-                        setEventDate(p.startDate)
-                        setEndDate(p.endDate)
-                        setFlexLabel(p.label)
-                      }}
-                      className="text-xs px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
-                    >
-                      D'ici fin du mois
-                    </button>
+                      return (
+                        <div
+                          key={ev.id}
+                          onClick={() => handleOpenEdit(ev)}
+                          className="p-2.5 rounded-lg bg-white border border-slate-200 hover:border-blue-300 transition-all cursor-pointer shadow-2xs flex items-start justify-between gap-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <span className={cn("p-1 rounded text-xs", conf.colorBg, conf.colorText)}>
+                                <Icon className="w-3 h-3" />
+                              </span>
+                              <span className="font-semibold text-xs text-slate-900 truncate">
+                                {ev.title}
+                              </span>
+                            </div>
+                            {parsed.cleanDesc && (
+                              <p className="text-[11px] text-slate-500 line-clamp-1">
+                                {parsed.cleanDesc}
+                              </p>
+                            )}
+                          </div>
+                          <Badge variant="outline" className="text-[10px] shrink-0 capitalize">
+                            {ev.status}
+                          </Badge>
+                        </div>
+                      )
+                    })}
                   </div>
+                )}
+              </CardContent>
+            </Card>
 
-                  <div className="space-y-1">
-                    <Label className="text-xs text-purple-900 font-semibold">Libellé de la période flexible</Label>
-                    <Input
-                      value={flexLabel}
-                      onChange={e => setFlexLabel(e.target.value)}
-                      placeholder="Ex: Dans les deux prochaines semaines"
-                      className="bg-white border-purple-200 text-sm"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">Début estimé</Label>
-                      <CustomDatePicker value={eventDate} onChange={setEventDate} placeholder="Date de début" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">Fin estimée</Label>
-                      <CustomDatePicker value={endDate} onChange={setEndDate} placeholder="Date de fin" />
-                    </div>
-                  </div>
+            {/* Upcoming Next Events Mini-list */}
+            <Card className="border-slate-200 shadow-2xs">
+              <CardHeader className="p-4 pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-slate-500" />
+                    Prochains événements
+                  </CardTitle>
+                  <span className="text-xs text-slate-400 font-medium">
+                    {events.filter(e => new Date(e.event_date) >= new Date(todayYMD)).length} à venir
+                  </span>
                 </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Date fixe</Label>
-                    <CustomDatePicker value={eventDate} onChange={setEventDate} placeholder="Date de l'événement" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Date de fin (optionnelle)</Label>
-                    <CustomDatePicker value={endDate} onChange={setEndDate} placeholder="Fin (optionnelle)" />
-                  </div>
+              </CardHeader>
+              <CardContent className="p-4 pt-1 divide-y divide-slate-100">
+                {events
+                  .filter(e => new Date(e.event_date) >= new Date(todayYMD))
+                  .slice(0, 5)
+                  .map(ev => {
+                    const conf = EVENT_TYPE_CONFIG[ev.event_type] || EVENT_TYPE_CONFIG.rdv
+                    const Icon = conf.icon
+                    const parsed = parseFlexibleEvent(ev.description)
+
+                    return (
+                      <div
+                        key={ev.id}
+                        onClick={() => handleOpenEdit(ev)}
+                        className="py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50 rounded-lg px-2 -mx-2 transition-colors cursor-pointer"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <Icon className={cn("w-3.5 h-3.5 shrink-0", conf.colorText)} />
+                            <p className="text-xs font-semibold text-slate-900 truncate">
+                              {ev.title}
+                            </p>
+                          </div>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            {parsed.isFlexible ? `⏳ ${parsed.flexLabel}` : formatDate(ev.event_date)}
+                          </p>
+                        </div>
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      </div>
+                    )
+                  })}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: PLANNING CHRONOLOGIQUE (AGENDA VIEW) */}
+      {activeTab === 'agenda' && (
+        <div className="space-y-6">
+          {[
+            { id: 'today', title: "Aujourd'hui", items: agendaGroups.today, badgeColor: 'bg-blue-600 text-white' },
+            { id: 'tomorrow', title: 'Demain', items: agendaGroups.tomorrow, badgeColor: 'bg-indigo-600 text-white' },
+            { id: 'thisWeek', title: 'Cette semaine', items: agendaGroups.thisWeek, badgeColor: 'bg-slate-800 text-white' },
+            { id: 'later', title: 'Prochainement (plus tard)', items: agendaGroups.later, badgeColor: 'bg-slate-600 text-white' },
+            { id: 'past', title: 'Événements passés', items: agendaGroups.past, badgeColor: 'bg-slate-400 text-white' }
+          ].map(section => {
+            if (section.items.length === 0) return null
+
+            return (
+              <div key={section.id} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className={cn("px-2.5 py-0.5 rounded-full text-xs font-bold", section.badgeColor)}>
+                    {section.title}
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    ({section.items.length} événement{section.items.length > 1 ? 's' : ''})
+                  </span>
                 </div>
-              )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {section.items.map(event => {
+                    const conf = EVENT_TYPE_CONFIG[event.event_type] || EVENT_TYPE_CONFIG.rdv
+                    const Icon = conf.icon
+                    const parsed = parseFlexibleEvent(event.description)
+                    const linkedTask = tasks.find(t => t.id === event.task_id)
+                    const linkedVendor = vendors.find(v => v.id === event.vendor_id)
+                    const isUrgent = linkedTask?.priority === 'haute'
+
+                    return (
+                      <Card
+                        key={event.id}
+                        className={cn(
+                          "border transition-all hover:shadow-xs",
+                          isUrgent ? "border-l-4 border-l-red-500" : (parsed.isFlexible ? "border-l-4 border-l-purple-500" : "border-l-4 border-l-blue-500")
+                        )}
+                      >
+                        <CardHeader className="p-4 pb-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={cn("p-1 rounded text-xs", conf.colorBg, conf.colorText)}>
+                                  <Icon className="w-3.5 h-3.5" />
+                                </span>
+                                <Badge variant="outline" className={cn("text-[10px] font-semibold", conf.colorBg, conf.colorText, conf.colorBorder)}>
+                                  {conf.label}
+                                </Badge>
+                                <span className="text-xs text-slate-500 font-medium">
+                                  {parsed.isFlexible ? `⏳ ${parsed.flexLabel}` : formatDate(event.event_date)}
+                                </span>
+                              </div>
+                              <h3 className="font-bold text-sm text-slate-900 truncate">
+                                {event.title}
+                              </h3>
+                            </div>
+
+                            {/* Status Selector */}
+                            <select
+                              value={event.status}
+                              onChange={(e) => handleStatusChange(event, e.target.value as EventStatus)}
+                              onClick={(e) => e.stopPropagation()}
+                              className={cn(
+                                "text-[11px] font-semibold rounded-md px-2 py-1 border transition-colors cursor-pointer",
+                                event.status === 'à venir' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                event.status === 'en attente' ? "bg-amber-50 text-amber-700 border-amber-200" :
+                                "bg-slate-100 text-slate-600 border-slate-200"
+                              )}
+                            >
+                              <option value="à venir">À venir</option>
+                              <option value="en attente">En attente</option>
+                              <option value="passé">Passé</option>
+                            </select>
+                          </div>
+                        </CardHeader>
+
+                        <CardContent className="p-4 pt-1 space-y-2.5">
+                          {parsed.cleanDesc && (
+                            <p className="text-xs text-slate-600 line-clamp-2">
+                              {parsed.cleanDesc}
+                            </p>
+                          )}
+
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {linkedTask && (
+                                <Badge variant="outline" className={cn("text-[10px]", isUrgent ? "bg-red-50 text-red-700 border-red-200" : "bg-blue-50 text-blue-700 border-blue-200")}>
+                                  {isUrgent ? '🔥 Tâche urgente' : 'Tâche'} : {linkedTask.title}
+                                </Badge>
+                              )}
+                              {linkedVendor && (
+                                <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-800 border-amber-200">
+                                  Prestataire : {linkedVendor.name}
+                                </Badge>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleOpenEdit(event)}
+                                className="h-7 px-2 text-xs text-slate-500 hover:text-blue-600 cursor-pointer"
+                              >
+                                <Pencil className="w-3.5 h-3.5 mr-1" />
+                                Modifier
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteEvent(event.id, event.title)}
+                                className="h-7 px-2 text-xs text-slate-500 hover:text-red-600 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* TAB 3: DATES FLEXIBLES VIEW */}
+      {activeTab === 'flexible' && (
+        <div className="space-y-4">
+          <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-4 flex items-start gap-3">
+            <Sparkles className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-purple-950 space-y-1">
+              <p className="font-bold text-sm">Gestion des dates et périodes flexibles</p>
+              <p>
+                Ces événements n'ont pas encore de date fixe arrêtée (par exemple « dans les deux prochaines semaines »).
+                Dès que la date d'intervention ou de livraison est confirmée, cliquez sur un événement pour lui assigner sa date définitive.
+              </p>
+            </div>
+          </div>
+
+          {events.filter(e => parseFlexibleEvent(e.description).isFlexible).length === 0 ? (
+            <Card className="bg-slate-50 border-dashed">
+              <CardContent className="p-8 text-center text-slate-500 text-xs">
+                Aucun événement en période flexible pour le moment.
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {events
+                .filter(e => parseFlexibleEvent(e.description).isFlexible)
+                .map(ev => {
+                  const parsed = parseFlexibleEvent(ev.description)
+                  const conf = EVENT_TYPE_CONFIG[ev.event_type] || EVENT_TYPE_CONFIG.rdv
+                  const Icon = conf.icon
+
+                  return (
+                    <Card key={ev.id} className="border-purple-200 border-l-4 border-l-purple-600 shadow-2xs">
+                      <CardHeader className="p-4 pb-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full mb-1">
+                              <Hourglass className="w-3 h-3" />
+                              {parsed.flexLabel}
+                            </span>
+                            <CardTitle className="text-base font-bold text-slate-900">
+                              {ev.title}
+                            </CardTitle>
+                          </div>
+                          <Badge variant="outline" className="text-xs capitalize">
+                            {ev.status}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="p-4 pt-1 space-y-3">
+                        <p className="text-xs text-slate-600">
+                          {parsed.cleanDesc || "Aucun détail complémentaire renseigné."}
+                        </p>
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                          <span className="text-xs text-slate-400">
+                            Fenêtre : {formatDate(ev.event_date)} {ev.end_date ? `au ${formatDate(ev.end_date)}` : ''}
+                          </span>
+                          <Button
+                            size="sm"
+                            onClick={() => handleOpenEdit(ev)}
+                            className="bg-purple-600 hover:bg-purple-700 text-white text-xs h-7 cursor-pointer"
+                          >
+                            Fixer la date définitive
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* UNIFIED DIALOG FOR ADDING & EDITING EVENTS */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {editingEvent ? "Modifier l'événement" : "Nouvel événement au calendrier"}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-3 text-slate-800">
+            {/* Titre */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">
+                Titre de l'événement <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                value={formTitle}
+                onChange={e => setFormTitle(e.target.value)}
+                placeholder="Ex: Intervention fibre SFR, Réunion Altior..."
+                className="bg-white text-sm"
+              />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <select 
-                  className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                  value={eventType} 
-                  onChange={e => setEventType(e.target.value as any)}
+            {/* Type & Statut */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Type d'événement</Label>
+                <select
+                  value={formEventType}
+                  onChange={e => setFormEventType(e.target.value as EventType)}
+                  className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
                   {EVENT_TYPES.map(t => (
                     <option key={t} value={t}>{EVENT_TYPE_LABELS[t] || t}</option>
                   ))}
                 </select>
               </div>
-              <div className="space-y-2">
-                <Label>Statut</Label>
-                <select 
-                  className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                  value={status} 
-                  onChange={e => setStatus(e.target.value as any)}
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Statut</Label>
+                <select
+                  value={formStatus}
+                  onChange={e => setFormStatus(e.target.value as EventStatus)}
+                  className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
                   {EVENT_STATUSES.map(s => (
-                    <option key={s} value={s}>{s}</option>
+                    <option key={s} value={s} className="capitalize">{s}</option>
                   ))}
                 </select>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Lier à un prestataire (optionnel)</Label>
-              <select
-                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
-                value={vendorId}
-                onChange={e => setVendorId(e.target.value)}
-              >
-                <option value="">-- Aucun prestataire lié --</option>
-                {vendors.map(v => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Description / Notes</Label>
-              <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Détails..." rows={3} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddOpen(false)}>Annuler</Button>
-            <Button onClick={handleAdd} disabled={!title || !eventDate}>Enregistrer</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog: Modifier un événement */}
-      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Modifier l'événement</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Lier à une tâche IT (optionnel)</Label>
-              <select
-                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
-                value={taskId}
-                onChange={e => setTaskId(e.target.value)}
-              >
-                <option value="">-- Aucune tâche liée --</option>
-                {tasks.map(t => (
-                  <option key={t.id} value={t.id}>
-                    [{t.category}] {t.title} ({t.status})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Titre</Label>
-              <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Titre de l'événement" />
-            </div>
-
-            {/* Sélecteur de date flexible ou date fixe */}
+            {/* Mode Date Flexible vs Date Fixe */}
             <div className="rounded-xl border border-purple-200 bg-purple-50/40 p-3.5 space-y-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-purple-600" />
-                  <span className="text-sm font-semibold text-purple-950">Mode Date Flexible</span>
+                <div className="flex items-center gap-1.5 text-xs font-bold text-purple-950">
+                  <Hourglass className="w-4 h-4 text-purple-600" />
+                  <span>Mode Période Flexible (date exacte encore inconnue)</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    if (!isFlexible) {
+                    if (!formIsFlexible) {
                       const p = getPresetDates('two_weeks')
-                      setEventDate(p.startDate)
-                      setEndDate(p.endDate)
-                      setFlexLabel(p.label)
-                      setIsFlexible(true)
+                      setFormEventDate(p.startDate)
+                      setFormEndDate(p.endDate)
+                      setFormFlexLabel(p.label)
+                      setFormIsFlexible(true)
                     } else {
-                      setIsFlexible(false)
+                      setFormIsFlexible(false)
                     }
                   }}
                   className={cn(
-                    "px-3 py-1 text-xs font-semibold rounded-full border transition-all cursor-pointer",
-                    isFlexible 
-                      ? "bg-purple-600 text-white border-purple-600 shadow-xs" 
+                    "px-2.5 py-1 text-xs font-semibold rounded-full border transition-all cursor-pointer",
+                    formIsFlexible
+                      ? "bg-purple-600 text-white border-purple-600 shadow-2xs"
                       : "bg-white text-slate-600 border-slate-300 hover:bg-slate-100"
                   )}
                 >
-                  {isFlexible ? "✓ Flexible activé" : "Activer date flexible"}
+                  {formIsFlexible ? "✓ Flexible activé" : "Activer date flexible"}
                 </button>
               </div>
 
-              {isFlexible ? (
-                <div className="space-y-3 pt-1 border-t border-purple-200/60">
-                  <p className="text-xs text-purple-700">
-                    💡 Date exacte inconnue ? Définissez une période estimée (ex: dans les 2 prochaines semaines).
-                  </p>
-
+              {formIsFlexible ? (
+                <div className="space-y-2.5 pt-2 border-t border-purple-200">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs font-medium text-slate-500 mr-1">Raccourcis :</span>
+                    <span className="text-xs text-slate-500 font-medium">Raccourcis :</span>
                     <button
                       type="button"
                       onClick={() => {
                         const p = getPresetDates('two_weeks')
-                        setEventDate(p.startDate)
-                        setEndDate(p.endDate)
-                        setFlexLabel(p.label)
+                        setFormEventDate(p.startDate)
+                        setFormEndDate(p.endDate)
+                        setFormFlexLabel(p.label)
                       }}
-                      className="text-xs px-2.5 py-1 rounded bg-white hover:bg-purple-100 border border-purple-300 text-purple-800 font-semibold cursor-pointer shadow-xs transition-colors"
+                      className="text-xs px-2 py-0.5 rounded bg-white hover:bg-purple-100 border border-purple-300 text-purple-800 font-semibold cursor-pointer"
                     >
-                      ⚡ Dans les 2 prochaines semaines
+                      Dans 2 semaines
                     </button>
                     <button
                       type="button"
                       onClick={() => {
                         const p = getPresetDates('this_week')
-                        setEventDate(p.startDate)
-                        setEndDate(p.endDate)
-                        setFlexLabel(p.label)
+                        setFormEventDate(p.startDate)
+                        setFormEndDate(p.endDate)
+                        setFormFlexLabel(p.label)
                       }}
-                      className="text-xs px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
+                      className="text-xs px-2 py-0.5 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
                     >
                       Cette semaine
                     </button>
                     <button
                       type="button"
                       onClick={() => {
-                        const p = getPresetDates('next_week')
-                        setEventDate(p.startDate)
-                        setEndDate(p.endDate)
-                        setFlexLabel(p.label)
-                      }}
-                      className="text-xs px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
-                    >
-                      Semaine prochaine
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
                         const p = getPresetDates('end_month')
-                        setEventDate(p.startDate)
-                        setEndDate(p.endDate)
-                        setFlexLabel(p.label)
+                        setFormEventDate(p.startDate)
+                        setFormEndDate(p.endDate)
+                        setFormFlexLabel(p.label)
                       }}
-                      className="text-xs px-2.5 py-1 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
+                      className="text-xs px-2 py-0.5 rounded bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer"
                     >
-                      D'ici fin du mois
+                      Fin du mois
                     </button>
                   </div>
 
                   <div className="space-y-1">
-                    <Label className="text-xs text-purple-900 font-semibold">Libellé de la période flexible</Label>
+                    <Label className="text-xs font-semibold text-purple-900">Libellé d'estimation</Label>
                     <Input
-                      value={flexLabel}
-                      onChange={e => setFlexLabel(e.target.value)}
+                      value={formFlexLabel}
+                      onChange={e => setFormFlexLabel(e.target.value)}
                       placeholder="Ex: Dans les deux prochaines semaines"
-                      className="bg-white border-purple-200 text-sm"
+                      className="bg-white text-xs border-purple-200"
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">Début estimé</Label>
-                      <CustomDatePicker value={eventDate} onChange={setEventDate} placeholder="Date de début" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <CustomDatePicker label="Début estimé" value={formEventDate} onChange={setFormEventDate} />
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">Fin estimée</Label>
-                      <CustomDatePicker value={endDate} onChange={setEndDate} placeholder="Date de fin" />
+                    <div>
+                      <CustomDatePicker label="Fin estimée" value={formEndDate} onChange={setFormEndDate} />
                     </div>
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div className="space-y-1">
-                    <Label className="text-xs">Date fixe</Label>
-                    <CustomDatePicker value={eventDate} onChange={setEventDate} placeholder="Date de l'événement" />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <CustomDatePicker label="Date de l'événement" value={formEventDate} onChange={setFormEventDate} />
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Date de fin (optionnelle)</Label>
-                    <CustomDatePicker value={endDate} onChange={setEndDate} placeholder="Fin (optionnelle)" />
+                  <div>
+                    <CustomDatePicker label="Date de fin (optionnelle)" value={formEndDate} onChange={setFormEndDate} />
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <select 
-                  className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                  value={eventType} 
-                  onChange={e => setEventType(e.target.value as any)}
+            {/* Liaison Tâche & Prestataire */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Lier à une tâche IT</Label>
+                <select
+                  value={formTaskId}
+                  onChange={e => handleSelectTask(e.target.value)}
+                  className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs truncate focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
-                  {EVENT_TYPES.map(t => (
-                    <option key={t} value={t}>{EVENT_TYPE_LABELS[t] || t}</option>
+                  <option value="">-- Aucune tâche liée --</option>
+                  {tasks.map(t => (
+                    <option key={t.id} value={t.id}>
+                      [{t.category}] {t.title}
+                    </option>
                   ))}
                 </select>
               </div>
-              <div className="space-y-2">
-                <Label>Statut</Label>
-                <select 
-                  className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-                  value={status} 
-                  onChange={e => setStatus(e.target.value as any)}
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Lier à un prestataire</Label>
+                <select
+                  value={formVendorId}
+                  onChange={e => setFormVendorId(e.target.value)}
+                  className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs truncate focus:outline-none focus:ring-2 focus:ring-blue-600"
                 >
-                  {EVENT_STATUSES.map(s => (
-                    <option key={s} value={s}>{s}</option>
+                  <option value="">-- Aucun prestataire lié --</option>
+                  {vendors.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
                   ))}
                 </select>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label>Lier à un prestataire (optionnel)</Label>
-              <select
-                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
-                value={vendorId}
-                onChange={e => setVendorId(e.target.value)}
-              >
-                <option value="">-- Aucun prestataire lié --</option>
-                {vendors.map(v => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <Textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="Détails..." rows={3} />
+            {/* Description */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Détails / Notes complémentaires</Label>
+              <Textarea
+                value={formDescription}
+                onChange={e => setFormDescription(e.target.value)}
+                placeholder="Précisions sur l'intervention, ordre du jour, lien visio..."
+                rows={3}
+                className="text-xs"
+              />
             </div>
           </div>
-          <DialogFooter className="flex justify-between sm:justify-between">
-            <Button variant="destructive" onClick={handleDelete}><Trash2 className="h-4 w-4 mr-2"/> Supprimer</Button>
-            <div className="flex space-x-2">
-              <Button variant="outline" onClick={() => setIsEditOpen(false)}>Annuler</Button>
-              <Button onClick={handleUpdate}>Enregistrer</Button>
+
+          <DialogFooter className="flex items-center justify-between gap-2 sm:justify-between pt-2 border-t border-slate-100">
+            {editingEvent ? (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={() => handleDeleteEvent(editingEvent.id, editingEvent.title)}
+                className="text-xs cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                Supprimer
+              </Button>
+            ) : <div />}
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsDialogOpen(false)}
+                className="text-xs cursor-pointer"
+              >
+                Annuler
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleSaveEvent}
+                disabled={!formTitle.trim() || !formEventDate}
+                className="bg-blue-600 hover:bg-blue-700 text-white text-xs cursor-pointer"
+              >
+                {editingEvent ? "Mettre à jour" : "Créer l'événement"}
+              </Button>
             </div>
           </DialogFooter>
         </DialogContent>
@@ -939,8 +1300,8 @@ function CalendrierContent() {
 
 export default function CalendrierPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-slate-500">Chargement du calendrier...</div>}>
-      <CalendrierContent />
+    <Suspense fallback={<div className="p-8 text-center text-slate-500">Chargement...</div>}>
+      <CalendrierInner />
     </Suspense>
   )
 }

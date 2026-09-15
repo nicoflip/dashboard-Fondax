@@ -1,6 +1,6 @@
 // Types miroir de la base de données Supabase
 
-export type TaskCategory = 'Sécurité' | 'Réseau' | 'Stockage-SharePoint' | 'Cahier des charges' | 'Prestataires' | 'Matériel' | 'Autre'
+export type TaskCategory = 'Sécurité' | 'Réseau' | 'Stockage-SharePoint' | 'Cahier des charges' | 'Prestataires' | 'Matériel' | 'Bureautique' | 'Support Utilisateur' | 'Autre'
 export type TaskStatus = 'à faire' | 'en cours' | 'en attente de retour externe' | 'fait'
 export type TaskPriority = 'haute' | 'moyenne' | 'basse'
 export type EventType = 'rdv' | 'appel' | 'échéance' | 'étape chantier'

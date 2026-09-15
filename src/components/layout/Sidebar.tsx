@@ -14,6 +14,7 @@ import {
   Handshake,
   ClipboardList,
   FileText,
+  FileBarChart,
   Menu,
   X,
   LogOut,
@@ -32,6 +33,7 @@ const navItems = [
   { href: '/prestataires', label: 'Prestataires', icon: Handshake },
   { href: '/chantiers', label: 'Chantiers', icon: ClipboardList },
   { href: '/notes', label: 'Notes', icon: FileText },
+  { href: '/rapports', label: 'Rapports', icon: FileBarChart },
 ]
 
 export function Sidebar() {
@@ -114,12 +116,12 @@ export function Sidebar() {
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-slate-900 z-30">
+      <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-slate-900 z-30 print:hidden">
         {renderNavContent()}
       </aside>
 
       {/* Mobile Header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 flex items-center justify-between px-4 h-14 border-b border-slate-800">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-slate-900 flex items-center justify-between px-4 h-14 border-b border-slate-800 print:hidden">
         <Link 
           href="/" 
           onClick={handleGoHome}
@@ -141,7 +143,7 @@ export function Sidebar() {
 
       {/* Mobile Overlay */}
       {mobileOpen && (
-        <div className="lg:hidden fixed inset-0 z-40">
+        <div className="lg:hidden fixed inset-0 z-40 print:hidden">
           <div
             className="absolute inset-0 bg-black/50"
             onClick={() => setMobileOpen(false)}

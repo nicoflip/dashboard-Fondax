@@ -14,8 +14,8 @@ export function LayoutWrapper({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       <Sidebar />
-      <main className="lg:pl-64 pt-14 lg:pt-0">
-        <div className="p-4 lg:p-8 max-w-7xl mx-auto">
+      <main className="lg:pl-64 pt-14 lg:pt-0 print:pl-0 print:pt-0">
+        <div className="p-4 lg:p-8 max-w-7xl mx-auto print:p-0 print:max-w-none">
           {children}
         </div>
       </main>

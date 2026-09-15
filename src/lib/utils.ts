@@ -32,6 +32,8 @@ export const TASK_CATEGORIES = [
   'Cahier des charges',
   'Prestataires',
   'Matériel',
+  'Bureautique',
+  'Support Utilisateur',
   'Autre',
 ] as const
 
@@ -80,3 +82,16 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   échéance: 'Échéance',
   'étape chantier': 'Étape chantier',
 }
+
+export const TASK_CATEGORY_COLORS: Record<string, string> = {
+  'Sécurité': 'bg-red-50 text-red-700 border-red-200',
+  'Réseau': 'bg-blue-50 text-blue-700 border-blue-200',
+  'Stockage-SharePoint': 'bg-sky-50 text-sky-700 border-sky-200',
+  'Cahier des charges': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  'Prestataires': 'bg-amber-50 text-amber-700 border-amber-200',
+  'Matériel': 'bg-orange-50 text-orange-700 border-orange-200',
+  'Bureautique': 'bg-teal-50 text-teal-700 border-teal-200',
+  'Support Utilisateur': 'bg-violet-50 text-violet-700 border-violet-200',
+  'Autre': 'bg-slate-50 text-slate-700 border-slate-200',
+}
+
