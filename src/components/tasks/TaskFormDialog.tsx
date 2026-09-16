@@ -14,9 +14,11 @@ import {
 } from '@/lib/utils'
 import { Task, CalendarEvent, TaskCategory, TaskPriority, TaskStatus, BlockerConfig, EventType } from '@/lib/types'
 import { parseTaskBlocker } from '@/lib/blockers'
+import { parseWaitingInfo, removeWaitingTag } from '@/lib/waiting'
 import { TaskBlockerSelector } from './TaskBlockerSelector'
 import { CustomDatePicker } from '@/components/ui/date-picker'
 import { Badge } from '@/components/ui/badge'
+import { Hourglass, Calendar as CalendarIcon, User } from 'lucide-react'
 
 export interface TaskFormData {
   title: string
@@ -25,6 +27,8 @@ export interface TaskFormData {
   priority: TaskPriority
   status: TaskStatus
   blocker: BlockerConfig
+  waitingOn?: string
+  followUpDate?: string
   createAlsoEvent?: boolean
   eventDate?: string
   eventType?: EventType
@@ -52,6 +56,8 @@ const DEFAULT_FORM_DATA: TaskFormData = {
     prereqEventId: '',
     unlockDate: ''
   },
+  waitingOn: '',
+  followUpDate: '',
   createAlsoEvent: false,
   eventDate: new Date().toISOString().split('T')[0],
   eventType: 'échéance'
@@ -72,9 +78,12 @@ export function TaskFormDialog({
     if (open) {
       if (editingTask) {
         const blocker = parseTaskBlocker(editingTask.description)
+        const waiting = parseWaitingInfo(editingTask.description)
+        const cleanDesc = removeWaitingTag(blocker.cleanDescription)
+
         setFormData({
           title: editingTask.title,
-          description: blocker.cleanDescription,
+          description: cleanDesc,
           category: editingTask.category,
           priority: editingTask.priority,
           status: editingTask.status,
@@ -85,6 +94,8 @@ export function TaskFormDialog({
             prereqEventId: blocker.prereqEventId || '',
             unlockDate: blocker.unlockDate || ''
           },
+          waitingOn: waiting.waitingOn || '',
+          followUpDate: waiting.followUpDate || '',
           createAlsoEvent: false,
           eventDate: new Date().toISOString().split('T')[0],
           eventType: 'échéance'
@@ -175,6 +186,75 @@ export function TaskFormDialog({
             {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
+
+        {/* Configuration de l'attente externe si ce statut est choisi */}
+        {formData.status === 'en attente de retour externe' && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50/60 p-3.5 space-y-3 shadow-2xs animate-in fade-in">
+            <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+              <Hourglass className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Délégation : la balle est dans leur camp</span>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-amber-950 flex items-center gap-1.5">
+                <User className="w-3.5 h-3.5 text-amber-700" />
+                De qui / quoi attendez-vous le retour ?
+              </Label>
+              <Input
+                value={formData.waitingOn || ''}
+                onChange={e => setFormData({ ...formData, waitingOn: e.target.value })}
+                placeholder="Ex: Prestataire SFR, Direction (devis), Fournisseur..."
+                className="bg-white h-9 text-xs border-amber-200 focus-visible:ring-amber-500"
+              />
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {['Prestataire', 'Fournisseur', 'Direction', 'Utilisateur'].map(target => (
+                  <button
+                    key={target}
+                    type="button"
+                    onClick={() => setFormData({ ...formData, waitingOn: target })}
+                    className="text-[10px] px-2 py-0.5 rounded border border-amber-200 bg-white text-amber-900 hover:bg-amber-100 cursor-pointer"
+                  >
+                    + {target}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-amber-950 flex items-center gap-1.5">
+                <CalendarIcon className="w-3.5 h-3.5 text-amber-700" />
+                Date de relance prévue
+              </Label>
+              <Input
+                type="date"
+                value={formData.followUpDate || ''}
+                onChange={e => setFormData({ ...formData, followUpDate: e.target.value })}
+                className="bg-white h-9 text-xs border-amber-200 focus-visible:ring-amber-500"
+              />
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {[
+                  { label: 'Demain', days: 1 },
+                  { label: 'Dans 3j', days: 3 },
+                  { label: 'Dans 1 sem.', days: 7 },
+                  { label: 'Dans 2 sem.', days: 14 }
+                ].map(({ label, days }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => {
+                      const d = new Date()
+                      d.setDate(d.getDate() + days)
+                      setFormData({ ...formData, followUpDate: d.toISOString().split('T')[0] })
+                    }}
+                    className="text-[10px] px-2 py-0.5 rounded border border-amber-200 bg-white text-amber-900 hover:bg-amber-100 cursor-pointer"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Option : Créer l'événement éponyme au calendrier */}
         {!editingTask && (

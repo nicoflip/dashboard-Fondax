@@ -16,7 +16,13 @@ import { TaskFilters, TaskTab } from '@/components/tasks/TaskFilters'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
 import { TaskScheduleDialog, ScheduleEventData } from '@/components/tasks/TaskScheduleDialog'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
-import { Plus, CheckCircle2, Flame } from 'lucide-react'
+import { TaskWaitingDialog } from '@/components/tasks/TaskWaitingDialog'
+import { 
+  formatTaskDescriptionWithWaiting, 
+  removeWaitingTag, 
+  getTaskWaitingDetails 
+} from '@/lib/waiting'
+import { Plus, CheckCircle2, Flame, Hourglass } from 'lucide-react'
 
 function TasksContent() {
   const supabase = createClient()
@@ -44,6 +50,9 @@ function TasksContent() {
 
   const [isFollowUpOpen, setIsFollowUpOpen] = useState(false)
   const [followUpTask, setFollowUpTask] = useState<Task | null>(null)
+
+  const [isWaitingOpen, setIsWaitingOpen] = useState(false)
+  const [taskForWaiting, setTaskForWaiting] = useState<Task | null>(null)
 
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null)
 
@@ -88,15 +97,54 @@ function TasksContent() {
 
   // Task status change
   const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
-    const { error } = await supabase.from('tasks').update({ status: newStatus }).eq('id', taskId)
+    const currentTask = tasks.find(t => t.id === taskId)
+    let updatedDesc = currentTask?.description || null
+
+    if (newStatus === 'en cours' && currentTask?.description) {
+      updatedDesc = removeWaitingTag(currentTask.description)
+    }
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({ 
+        status: newStatus,
+        description: updatedDesc,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', taskId)
+
     if (!error) {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t))
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus, description: updatedDesc } : t))
       if (newStatus === 'fait') {
         const found = tasks.find(t => t.id === taskId)
         if (found) {
           setFollowUpTask({ ...found, status: 'fait' })
           setIsFollowUpOpen(true)
         }
+      } else if (newStatus === 'en attente de retour externe') {
+        const found = tasks.find(t => t.id === taskId)
+        if (found) {
+          setTaskForWaiting(found)
+          setIsWaitingOpen(true)
+        }
+      }
+    }
+  }
+
+  // Enregistrement spécifique pour le dialogue d'attente
+  const handleSaveWaiting = async (taskId: string, newStatus: TaskStatus, newDescription: string) => {
+    const { error } = await supabase.from('tasks').update({
+      status: newStatus,
+      description: newDescription,
+      updated_at: new Date().toISOString()
+    }).eq('id', taskId)
+
+    if (!error) {
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus, description: newDescription } : t))
+      if (newStatus === 'en cours') {
+        showNotification('✓ Réponse consignée : tâche reprise en cours !')
+      } else {
+        showNotification('✓ Suivi d\'attente et relance enregistrés !')
       }
     }
   }
@@ -112,10 +160,19 @@ function TasksContent() {
 
   // Save task (create or update)
   const handleSaveTask = async (formData: TaskFormData) => {
-    const finalDescription = formatTaskDescriptionWithBlocker(
+    let finalDescription = formatTaskDescriptionWithBlocker(
       formData.description,
       formData.blocker
     )
+
+    if (formData.status === 'en attente de retour externe') {
+      finalDescription = formatTaskDescriptionWithWaiting(finalDescription, {
+        waitingOn: formData.waitingOn || '',
+        followUpDate: formData.followUpDate || '',
+      })
+    } else {
+      finalDescription = removeWaitingTag(finalDescription)
+    }
 
     if (editingTask) {
       const wasFait = editingTask.status === 'fait'
@@ -204,14 +261,30 @@ function TasksContent() {
     }
   }
 
+  // Waiting metrics computation
+  const waitingTasks = useMemo(() => tasks.filter(t => t.status === 'en attente de retour externe'), [tasks])
+  const waitingDueCount = useMemo(() => {
+    return waitingTasks.filter(t => {
+      const { metrics } = getTaskWaitingDetails(t)
+      return metrics.followUpStatus === 'overdue' || metrics.followUpStatus === 'today'
+    }).length
+  }, [waitingTasks])
+  const draggingCount = useMemo(() => {
+    return waitingTasks.filter(t => {
+      const { metrics } = getTaskWaitingDetails(t)
+      return metrics.isDragging
+    }).length
+  }, [waitingTasks])
+
   // Counts for filter tabs
   const tabCounts = useMemo(() => ({
     urgentes: tasks.filter(t => t.priority === 'haute' && t.status !== 'fait').length,
     aTraiter: tasks.filter(t => ['à faire', 'en cours'].includes(t.status)).length,
-    enAttente: tasks.filter(t => t.status === 'en attente de retour externe').length,
+    enAttente: waitingTasks.length,
+    waitingDueCount,
     terminees: tasks.filter(t => t.status === 'fait').length,
     toutes: tasks.length
-  }), [tasks])
+  }), [tasks, waitingTasks, waitingDueCount])
 
   // Filtered & sorted tasks
   const filteredTasks = useMemo(() => {
@@ -293,6 +366,52 @@ function TasksContent() {
         totalDisplayed={filteredTasks.length}
       />
 
+      {/* Bandeau explicatif & stats spécifiques à l'onglet "En attente" */}
+      {activeTab === 'en-attente' && (
+        <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50/90 via-white to-amber-50/40 p-4 shadow-xs space-y-3 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-amber-100 pb-3">
+            <div className="flex items-center gap-3 text-amber-950">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                <Hourglass className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  Délégation & Tâches en attente
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                    Balle dans leur camp
+                  </span>
+                </h2>
+                <p className="text-xs text-slate-600">
+                  Ces tâches sont bloquées par l&apos;attente d&apos;une réponse ou d&apos;une action externe (prestataire, direction, collègue).
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-white text-slate-700 border border-slate-200 shadow-2xs">
+                Total : <strong>{tabCounts.enAttente}</strong> dossier(s)
+              </span>
+              {tabCounts.waitingDueCount !== undefined && tabCounts.waitingDueCount > 0 && (
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-red-600 text-white shadow-2xs animate-pulse">
+                  🔔 {tabCounts.waitingDueCount} relance(s) due(s)
+                </span>
+              )}
+              {draggingCount > 0 && (
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-900 text-amber-100 shadow-2xs">
+                  ⚠️ {draggingCount} qui traîne(nt) (&gt; 7j)
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-600 flex flex-wrap items-center justify-between gap-2">
+            <span>
+              💡 <strong>Gestion rapide :</strong> Cliquez sur <em>« Gérer relance »</em> pour consigner un rappel, ou sur <em>« Réponse reçue »</em> dès que le retour arrive pour remettre la tâche en cours.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Liste des tâches */}
       {filteredTasks.length === 0 ? (
         <Card className="flex flex-col items-center justify-center p-12 text-slate-500 border-dashed">
@@ -300,6 +419,9 @@ function TasksContent() {
           <p className="font-medium text-slate-600">Aucune tâche ne correspond aux critères sélectionnés.</p>
           {activeTab === 'urgentes' && (
             <p className="text-xs text-slate-400 mt-1">Bonne nouvelle ! Aucune tâche prioritaire en attente.</p>
+          )}
+          {activeTab === 'en-attente' && (
+            <p className="text-xs text-slate-400 mt-1">Aucune tâche en attente de retour externe actuellement.</p>
           )}
         </Card>
       ) : (
@@ -329,6 +451,10 @@ function TasksContent() {
                         setIsScheduleOpen(true)
                       }}
                       onStatusChange={handleStatusChange}
+                      onManageWaiting={(t) => {
+                        setTaskForWaiting(t)
+                        setIsWaitingOpen(true)
+                      }}
                     />
                   ))}
                 </div>
@@ -367,6 +493,10 @@ function TasksContent() {
                       setIsScheduleOpen(true)
                     }}
                     onStatusChange={handleStatusChange}
+                    onManageWaiting={(t) => {
+                      setTaskForWaiting(t)
+                      setIsWaitingOpen(true)
+                    }}
                   />
                 ))}
               </div>
@@ -409,6 +539,16 @@ function TasksContent() {
           showNotification(msg)
           fetchTasks()
         }}
+      />
+
+      <TaskWaitingDialog
+        open={isWaitingOpen}
+        task={taskForWaiting}
+        onClose={() => {
+          setIsWaitingOpen(false)
+          setTaskForWaiting(null)
+        }}
+        onSave={handleSaveWaiting}
       />
     </div>
   )

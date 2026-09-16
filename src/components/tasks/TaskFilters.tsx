@@ -19,6 +19,7 @@ interface TaskFiltersProps {
     urgentes: number
     aTraiter: number
     enAttente: number
+    waitingDueCount?: number
     terminees: number
     toutes: number
   }
@@ -86,12 +87,22 @@ export function TaskFilters({
           type="button"
           onClick={() => onTabChange('en-attente')}
           className={cn(
-            "px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer", 
-            activeTab === 'en-attente' ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-700 hover:bg-amber-100"
+            "px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer shadow-2xs", 
+            activeTab === 'en-attente' 
+              ? "bg-amber-600 text-white ring-2 ring-amber-400 ring-offset-1" 
+              : "bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100"
           )}
         >
-          <Hourglass className="w-4 h-4" />
-          En attente retour externe <span className="opacity-70">({counts.enAttente})</span>
+          <Hourglass className="w-4 h-4 shrink-0" />
+          <span>En attente retour ({counts.enAttente})</span>
+          {counts.waitingDueCount !== undefined && counts.waitingDueCount > 0 && (
+            <span className={cn(
+              "px-2 py-0.5 rounded-full text-xs font-black",
+              activeTab === 'en-attente' ? "bg-amber-950 text-amber-200" : "bg-red-600 text-white animate-pulse"
+            )}>
+              {counts.waitingDueCount} à relancer
+            </span>
+          )}
         </button>
 
         <button 

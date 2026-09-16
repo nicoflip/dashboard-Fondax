@@ -7,16 +7,25 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate } from '@/lib/utils'
-import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban } from 'lucide-react'
+import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban, Hourglass } from 'lucide-react'
 import { Task, Project, CalendarEvent } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 import { parseFlexibleEvent } from '@/lib/flexible-events'
-
+import { getTaskWaitingDetails, removeWaitingTag } from '@/lib/waiting'
 
 export default function Dashboard() {
   const supabase = createClient()
-  const [stats, setStats] = useState({ openTasks: 0, highPriorityTasks: 0, activeProjects: 0, upcomingEvents: 0 })
+  const [stats, setStats] = useState({ 
+    openTasks: 0, 
+    highPriorityTasks: 0, 
+    waitingTasksCount: 0,
+    waitingDueCount: 0,
+    draggingCount: 0,
+    activeProjects: 0, 
+    upcomingEvents: 0 
+  })
   const [highPriorityTasks, setHighPriorityTasks] = useState<Task[]>([])
+  const [waitingTasksList, setWaitingTasksList] = useState<Task[]>([])
   const [upcomingEventsList, setUpcomingEventsList] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -31,6 +40,7 @@ export default function Dashboard() {
       const [
         openTasksRes,
         highPriorityCountRes,
+        waitingTasksRes,
         activeProjectsRes,
         upcomingEventsRes,
         topTasksRes,
@@ -38,25 +48,63 @@ export default function Dashboard() {
       ] = await Promise.all([
         supabase.from('tasks').select('*', { count: 'exact', head: true }).neq('status', 'fait'),
         supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('priority', 'haute').neq('status', 'fait'),
+        supabase.from('tasks').select('*').eq('status', 'en attente de retour externe').order('updated_at', { ascending: false }),
         supabase.from('projects').select('*', { count: 'exact', head: true }).eq('status', 'EN COURS'),
         supabase.from('events').select('*', { count: 'exact', head: true }).eq('status', 'à venir'),
         supabase.from('tasks').select('*').eq('priority', 'haute').neq('status', 'fait').order('created_at', { ascending: false }).limit(5),
         supabase.from('events').select('*').gte('event_date', now).order('event_date', { ascending: true }).limit(5)
       ])
 
+      const waitingList = waitingTasksRes.data || []
+      const waitingDueCount = waitingList.filter(t => {
+        const { metrics } = getTaskWaitingDetails(t)
+        return metrics.followUpStatus === 'overdue' || metrics.followUpStatus === 'today'
+      }).length
+      const draggingCount = waitingList.filter(t => {
+        const { metrics } = getTaskWaitingDetails(t)
+        return metrics.isDragging
+      }).length
+
       setStats({
         openTasks: openTasksRes.count || 0,
         highPriorityTasks: highPriorityCountRes.count || 0,
+        waitingTasksCount: waitingList.length,
+        waitingDueCount,
+        draggingCount,
         activeProjects: activeProjectsRes.count || 0,
         upcomingEvents: upcomingEventsRes.count || 0
       })
 
       if (topTasksRes.data) setHighPriorityTasks(topTasksRes.data)
+      setWaitingTasksList(waitingList)
       if (eventsRes.data) setUpcomingEventsList(eventsRes.data)
       setLoading(false)
     }
     fetchData()
   }, [])
+
+  const handleResumeWaitingTask = async (task: Task) => {
+    const todayStr = new Date().toLocaleDateString('fr-FR')
+    const cleanDesc = removeWaitingTag(task.description)
+    const finalDesc = `${cleanDesc}\n[Retour reçu le ${todayStr}] Reprise de la tâche en cours.`
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        status: 'en cours',
+        description: finalDesc.trim(),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', task.id)
+
+    if (!error) {
+      setWaitingTasksList(prev => prev.filter(t => t.id !== task.id))
+      setStats(prev => ({
+        ...prev,
+        waitingTasksCount: Math.max(0, prev.waitingTasksCount - 1),
+      }))
+    }
+  }
 
   const toggleTaskStatus = async (task: Task) => {
     const newStatus = task.status === 'en cours' ? 'fait' : 'en cours'
@@ -83,16 +131,16 @@ export default function Dashboard() {
       <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tableau de Bord IT</h1>
 
       {/* Stats Cards cliquables avec filtrage ciblé */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <Link href="/taches?tab=a-traiter" className="block group" title="Voir les tâches ouvertes à traiter">
           <Card className="transition-all duration-200 group-hover:border-blue-400 group-hover:shadow-md cursor-pointer h-full">
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                <ClipboardList className="h-6 w-6" />
+            <CardContent className="flex items-center gap-3.5 p-5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-100 text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-colors shrink-0">
+                <ClipboardList className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-500 group-hover:text-blue-600 transition-colors">Tâches ouvertes</p>
-                <h2 className="text-3xl font-bold text-slate-900">{stats.openTasks}</h2>
+                <p className="text-xs font-semibold text-slate-500 group-hover:text-blue-600 transition-colors">Tâches ouvertes</p>
+                <h2 className="text-2xl font-bold text-slate-900">{stats.openTasks}</h2>
               </div>
             </CardContent>
           </Card>
@@ -100,16 +148,42 @@ export default function Dashboard() {
         
         <Link href="/taches?tab=urgentes" className="block group" title="Voir uniquement les tâches urgentes / priorité haute">
           <Card className="transition-all duration-200 border-red-200 group-hover:border-red-500 group-hover:shadow-md cursor-pointer h-full bg-red-50/20">
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-red-100 text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors">
-                <Flame className="h-6 w-6 fill-red-500 animate-pulse" />
+            <CardContent className="flex items-center gap-3.5 p-5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-red-100 text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors shrink-0">
+                <Flame className="h-5 w-5 fill-red-500 animate-pulse" />
               </div>
               <div>
-                <div className="flex items-center gap-1.5">
-                  <p className="text-sm font-bold text-red-600">Priorité haute</p>
-                  <span className="text-[10px] font-black bg-red-600 text-white px-1.5 py-0.2 rounded uppercase">Urgent</span>
+                <div className="flex items-center gap-1">
+                  <p className="text-xs font-bold text-red-600">Priorité haute</p>
+                  <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.2 rounded uppercase">Urgent</span>
                 </div>
-                <h2 className="text-3xl font-bold text-red-700">{stats.highPriorityTasks}</h2>
+                <h2 className="text-2xl font-bold text-red-700">{stats.highPriorityTasks}</h2>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        <Link href="/en-attente" className="block group" title="Voir les dossiers en attente de retour externe">
+          <Card className={cn(
+            "transition-all duration-200 group-hover:border-amber-400 group-hover:shadow-md cursor-pointer h-full",
+            stats.waitingDueCount > 0 ? "border-amber-300 bg-amber-50/30" : ""
+          )}>
+            <CardContent className="flex items-center gap-3.5 p-5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-amber-100 text-amber-700 group-hover:bg-amber-600 group-hover:text-white transition-colors shrink-0">
+                <Hourglass className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <p className="text-xs font-semibold text-slate-500 group-hover:text-amber-700 transition-colors">
+                    En attente tiers
+                  </p>
+                  {stats.waitingDueCount > 0 && (
+                    <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.2 rounded uppercase animate-pulse">
+                      {stats.waitingDueCount} relance{stats.waitingDueCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900">{stats.waitingTasksCount}</h2>
               </div>
             </CardContent>
           </Card>
@@ -117,13 +191,13 @@ export default function Dashboard() {
 
         <Link href="/chantiers?status=EN_COURS" className="block group" title="Voir les chantiers en cours">
           <Card className="transition-all duration-200 group-hover:border-emerald-400 group-hover:shadow-md cursor-pointer h-full">
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                <FolderKanban className="h-6 w-6" />
+            <CardContent className="flex items-center gap-3.5 p-5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-emerald-100 text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-colors shrink-0">
+                <FolderKanban className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-500 group-hover:text-emerald-600 transition-colors">Chantiers en cours</p>
-                <h2 className="text-3xl font-bold text-slate-900">{stats.activeProjects}</h2>
+                <p className="text-xs font-semibold text-slate-500 group-hover:text-emerald-600 transition-colors">Chantiers</p>
+                <h2 className="text-2xl font-bold text-slate-900">{stats.activeProjects}</h2>
               </div>
             </CardContent>
           </Card>
@@ -131,13 +205,13 @@ export default function Dashboard() {
 
         <Link href="/calendrier?filter=a_venir" className="block group" title="Voir les événements à venir">
           <Card className="transition-all duration-200 group-hover:border-purple-400 group-hover:shadow-md cursor-pointer h-full">
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors">
-                <Calendar className="h-6 w-6" />
+            <CardContent className="flex items-center gap-3.5 p-5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-purple-100 text-purple-600 group-hover:bg-purple-600 group-hover:text-white transition-colors shrink-0">
+                <Calendar className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-500 group-hover:text-purple-600 transition-colors">Événements à venir</p>
-                <h2 className="text-3xl font-bold text-slate-900">{stats.upcomingEvents}</h2>
+                <p className="text-xs font-semibold text-slate-500 group-hover:text-purple-600 transition-colors">Événements</p>
+                <h2 className="text-2xl font-bold text-slate-900">{stats.upcomingEvents}</h2>
               </div>
             </CardContent>
           </Card>
@@ -145,12 +219,12 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Actions Prioritaires & Alertes */}
+        {/* Colonne 1 : Actions prioritaires & Section En attente de tiers */}
         <div className="space-y-6">
           <Card className="border-red-200 shadow-xs">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-red-700">
+                <CardTitle className="flex items-center gap-2 text-red-700 text-base font-bold">
                   <Flame className="h-5 w-5 fill-red-500 text-red-600 animate-pulse" />
                   Actions prioritaires ({highPriorityTasks.length})
                 </CardTitle>
@@ -194,23 +268,117 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-red-600">
-                <AlertCircle className="h-5 w-5" />
-                Alertes en cours
-              </CardTitle>
+          {/* Section "En attente de retour externe & Relances" */}
+          <Card className={cn(
+            "shadow-xs transition-all",
+            stats.waitingDueCount > 0 ? "border-amber-300" : "border-slate-200"
+          )}>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-amber-100 text-amber-800">
+                    <Hourglass className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      En attente de retour ({waitingTasksList.length})
+                    </CardTitle>
+                    <p className="text-[11px] text-slate-500">
+                      Balle dans leur camp • Délais & relances
+                    </p>
+                  </div>
+                </div>
+                <Link
+                  href="/en-attente"
+                  className="text-xs font-semibold text-amber-700 hover:text-amber-900 hover:underline flex items-center gap-1"
+                >
+                  Voir la rubrique &rarr;
+                </Link>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {highPriorityTasks.length === 0 ? (
-                <p className="text-sm text-slate-500">Aucune alerte en cours.</p>
+              {waitingTasksList.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed">
+                  Aucun dossier en attente de tiers. La balle est toujours dans votre camp !
+                </div>
               ) : (
-                highPriorityTasks.map(task => (
-                  <div key={task.id} className="flex items-center gap-3 rounded-md border-l-4 border-l-red-500 bg-slate-50 p-3">
-                    <AlertCircle className="h-4 w-4 text-red-500" />
-                    <span className="text-sm font-medium text-slate-900">{task.title}</span>
-                  </div>
-                ))
+                waitingTasksList.slice(0, 5).map(task => {
+                  const { info: waitingInfo, metrics } = getTaskWaitingDetails(task)
+                  return (
+                    <div
+                      key={task.id}
+                      className={cn(
+                        "rounded-xl border p-3.5 text-xs space-y-2 transition-all shadow-2xs",
+                        metrics.isDragging 
+                          ? "border-l-[5px] border-l-red-600 border-red-200 bg-red-50/40 hover:bg-red-50/60" 
+                          : metrics.isWarning
+                          ? "border-l-[5px] border-l-amber-600 border-amber-200 bg-amber-50/30 hover:bg-amber-50/50"
+                          : "border-l-[5px] border-l-amber-500 border-slate-200 bg-slate-50/60 hover:bg-slate-50"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-bold text-slate-900 text-sm truncate" title={task.title}>
+                            {task.title}
+                          </h4>
+                          <div className="text-[11px] text-slate-600 mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span className="font-semibold text-amber-950">
+                              Attente de : <strong className="underline decoration-amber-400">{waitingInfo.waitingOn || 'Tiers externe'}</strong>
+                            </span>
+                            <span>•</span>
+                            <span className="text-slate-600">Depuis <strong>{metrics.daysWaiting} j</strong></span>
+                            {metrics.isDragging && (
+                              <span className="bg-red-600 text-white font-black text-[9px] px-1.5 py-0.2 rounded uppercase">
+                                ⚠️ Traîne
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleResumeWaitingTask(task)}
+                          title="Le tiers a répondu : reprendre la tâche en cours"
+                          className="h-7 px-2.5 text-[11px] border-emerald-300 text-emerald-800 hover:bg-emerald-100 shrink-0 font-semibold cursor-pointer shadow-2xs"
+                        >
+                          ✓ Réponse reçue
+                        </Button>
+                      </div>
+
+                      {/* Échéance de relance */}
+                      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-200/70 text-slate-500">
+                        <div>
+                          {metrics.followUpStatus === 'overdue' && (
+                            <span className="font-bold text-red-700 flex items-center gap-1">
+                              🚨 Relance en retard ({Math.abs(metrics.daysDiffFollowUp || 0)}j)
+                            </span>
+                          )}
+                          {metrics.followUpStatus === 'today' && (
+                            <span className="font-bold text-amber-800 flex items-center gap-1">
+                              🔔 À relancer aujourd&apos;hui !
+                            </span>
+                          )}
+                          {metrics.followUpStatus === 'upcoming' && (
+                            <span>
+                              Relance prévue le <strong>{metrics.formattedFollowUpDate}</strong>
+                            </span>
+                          )}
+                          {metrics.followUpStatus === 'none' && (
+                            <span className="italic text-slate-400">Date de relance non fixée</span>
+                          )}
+                        </div>
+
+                        <Link
+                          href="/taches?tab=en-attente"
+                          className="text-amber-800 hover:underline font-semibold ml-auto flex items-center gap-1"
+                        >
+                          Gérer relance &rarr;
+                        </Link>
+                      </div>
+                    </div>
+                  )
+                })
               )}
             </CardContent>
           </Card>

@@ -8,14 +8,28 @@ export function parseTaskBlocker(desc?: string | null): TaskBlockerInfo {
     return { type: 'none', requiredStatus: 'fait', cleanDescription: '' }
   }
 
+  // Retirer temporairement les balises [waiting:...] pour matcher le bloqueur indépendamment de l'ordre
+  const cleanedForBlocker = desc.replace(/\[waiting:[^\]]+\]\s*\n?/gi, '')
+
   // 1. Bloqueur par tâche (nouveau format) : [depends_on:task:<taskId>:<status>]
-  const taskMatch = desc.match(/^\[depends_on:task:([^:]+):([^\]]+)\]\s*\n?([\s\S]*)$/i)
+  const taskMatch = cleanedForBlocker.match(/^\[depends_on:task:([^:]+):([^\]]+)\]\s*\n?([\s\S]*)$/i)
   if (taskMatch) {
     return {
       type: 'task',
       prereqTaskId: taskMatch[1].trim(),
       requiredStatus: (taskMatch[2].trim() as TaskStatus) || 'fait',
       cleanDescription: taskMatch[3].trim()
+    }
+  }
+
+  // 1b. Bloqueur par retour tiers en attente : [depends_on:waiting:<taskId>]
+  const waitingMatch = cleanedForBlocker.match(/^\[depends_on:waiting:([^\]]+)\]\s*\n?([\s\S]*)$/i)
+  if (waitingMatch) {
+    return {
+      type: 'waiting',
+      prereqTaskId: waitingMatch[1].trim(),
+      requiredStatus: 'fait',
+      cleanDescription: waitingMatch[2].trim()
     }
   }
 
@@ -63,6 +77,9 @@ export function formatTaskDescriptionWithBlocker(
   blocker: BlockerConfig
 ): string {
   const base = (cleanDesc || '').trim()
+  if (blocker.type === 'waiting' && blocker.prereqTaskId) {
+    return `[depends_on:waiting:${blocker.prereqTaskId}]\n${base}`.trim()
+  }
   if (blocker.type === 'task' && blocker.prereqTaskId) {
     const st = blocker.requiredStatus || 'fait'
     return `[depends_on:task:${blocker.prereqTaskId}:${st}]\n${base}`.trim()
@@ -87,6 +104,14 @@ export function checkTaskBlocked(
   const blocker = parseTaskBlocker(t.description)
   if (blocker.type === 'none') {
     return { isBlocked: false, blocker }
+  }
+
+  if (blocker.type === 'waiting' && blocker.prereqTaskId) {
+    const prereq = allTasks.find(item => item.id === blocker.prereqTaskId)
+    if (!prereq) return { isBlocked: false, blocker }
+    // Bloqué tant que le dossier est en attente de retour externe
+    const isBlocked = prereq.status === 'en attente de retour externe'
+    return { isBlocked, blocker, prereqTask: prereq }
   }
 
   if (blocker.type === 'task' && blocker.prereqTaskId) {

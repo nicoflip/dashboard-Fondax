@@ -19,6 +19,7 @@ import {
   X,
   LogOut,
   Shield,
+  Hourglass,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
@@ -26,6 +27,7 @@ import { useRouter } from 'next/navigation'
 const navItems = [
   { href: '/', label: 'Tableau de bord', icon: LayoutDashboard },
   { href: '/taches', label: 'Tâches', icon: CheckSquare },
+  { href: '/en-attente', label: 'En attente', icon: Hourglass },
   { href: '/reseau', label: 'Plan réseau', icon: Network },
   { href: '/calendrier', label: 'Calendrier', icon: Calendar },
   { href: '/parc', label: 'Parc informatique', icon: Monitor },

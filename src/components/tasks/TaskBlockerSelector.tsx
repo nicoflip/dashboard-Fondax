@@ -24,12 +24,14 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { CustomDatePicker } from '@/components/ui/date-picker'
+import { parseWaitingInfo } from '@/lib/waiting'
 import { 
   Lock, 
   Unlock, 
   CheckSquare, 
   Calendar, 
   Clock, 
+  Hourglass,
   Search, 
   Check, 
   X, 
@@ -68,6 +70,24 @@ export function TaskBlockerSelector({
   const [eventSearch, setEventSearch] = useState('')
   const [eventTypeFilter, setEventTypeFilter] = useState<string>('ALL')
 
+  const [waitingSearch, setWaitingSearch] = useState('')
+
+  // Filter waiting tasks (status === 'en attente de retour externe' or currently selected)
+  const eligibleWaitingTasks = useMemo(() => {
+    return tasks.filter(t => (!currentTaskId || t.id !== currentTaskId) && (t.status === 'en attente de retour externe' || t.id === value.prereqTaskId))
+  }, [tasks, currentTaskId, value.prereqTaskId])
+
+  const filteredWaitingTasks = useMemo(() => {
+    const q = waitingSearch.trim().toLowerCase()
+    return eligibleWaitingTasks.filter(t => {
+      if (!q) return true
+      const titleMatch = t.title.toLowerCase().includes(q)
+      const descMatch = (t.description || '').toLowerCase().includes(q)
+      const catMatch = t.category.toLowerCase().includes(q)
+      return titleMatch || descMatch || catMatch
+    })
+  }, [eligibleWaitingTasks, waitingSearch])
+
   // Filter tasks
   const eligibleTasks = useMemo(() => {
     return tasks.filter(t => !currentTaskId || t.id !== currentTaskId)
@@ -102,6 +122,11 @@ export function TaskBlockerSelector({
   }, [events, eventSearch, eventTypeFilter])
 
   // Selected entities
+  const selectedWaitingTask = useMemo(() => {
+    if (value.type !== 'waiting' || !value.prereqTaskId) return null
+    return tasks.find(t => t.id === value.prereqTaskId) || null
+  }, [tasks, value])
+
   const selectedTask = useMemo(() => {
     if (value.type !== 'task' || !value.prereqTaskId) return null
     return tasks.find(t => t.id === value.prereqTaskId) || null
@@ -185,27 +210,41 @@ export function TaskBlockerSelector({
         </p>
       </div>
 
-      {/* 4-Option Segmented Control */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-slate-200/70 rounded-lg text-xs font-semibold">
+      {/* 5-Option Segmented Control */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1 bg-slate-200/70 rounded-lg text-xs font-semibold">
         <button
           type="button"
           onClick={() => onChange({ ...value, type: 'none' })}
           className={cn(
-            "py-2 px-2.5 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
+            "py-2 px-2 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
             value.type === 'none'
               ? "bg-white text-slate-900 shadow-xs font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
           )}
         >
           <Unlock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-          <span>Aucun (Active)</span>
+          <span>Aucun</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onChange({ ...value, type: 'waiting', prereqTaskId: value.type === 'waiting' ? value.prereqTaskId : '' })}
+          className={cn(
+            "py-2 px-2 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
+            value.type === 'waiting'
+              ? "bg-white text-amber-900 shadow-xs font-bold"
+              : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
+          )}
+        >
+          <Hourglass className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+          <span>Retour tiers</span>
         </button>
 
         <button
           type="button"
           onClick={() => onChange({ ...value, type: 'task', requiredStatus: value.requiredStatus || 'fait' })}
           className={cn(
-            "py-2 px-2.5 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
+            "py-2 px-2 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
             value.type === 'task'
               ? "bg-white text-blue-700 shadow-xs font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
@@ -219,7 +258,7 @@ export function TaskBlockerSelector({
           type="button"
           onClick={() => onChange({ ...value, type: 'event' })}
           className={cn(
-            "py-2 px-2.5 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
+            "py-2 px-2 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
             value.type === 'event'
               ? "bg-white text-purple-800 shadow-xs font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
@@ -236,14 +275,14 @@ export function TaskBlockerSelector({
             onChange({ ...value, type: 'date', unlockDate: defaultDate })
           }}
           className={cn(
-            "py-2 px-2.5 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
+            "py-2 px-2 rounded-md transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center",
             value.type === 'date'
               ? "bg-white text-amber-900 shadow-xs font-bold"
               : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/50"
           )}
         >
           <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-          <span>Date précise</span>
+          <span>Date</span>
         </button>
       </div>
 
@@ -252,6 +291,124 @@ export function TaskBlockerSelector({
         <div className="bg-white p-3 rounded-lg border border-slate-200 text-xs text-slate-600 flex items-center gap-2">
           <Check className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>Cette tâche sera disponible et prête immédiatement dès sa création.</span>
+        </div>
+      )}
+
+      {/* MODE 2: BLOQUÉE PAR UN RETOUR TIERS EN ATTENTE */}
+      {value.type === 'waiting' && (
+        <div className="space-y-3 bg-white p-3.5 rounded-xl border border-amber-300 shadow-2xs">
+          {/* Selected Waiting Task Banner */}
+          {selectedWaitingTask ? (
+            <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-300 rounded-lg">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                  <Hourglass className="w-3.5 h-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">
+                    Dossier / Retour bloquant sélectionné :
+                  </p>
+                  <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                    {selectedWaitingTask.title}
+                  </p>
+                  {parseWaitingInfo(selectedWaitingTask.description).waitingOn && (
+                    <p className="text-[11px] text-amber-900">
+                      En attente de : <strong>{parseWaitingInfo(selectedWaitingTask.description).waitingOn}</strong>
+                    </p>
+                  )}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onChange({ ...value, prereqTaskId: '' })}
+                className="h-7 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+              >
+                Changer
+              </Button>
+            </div>
+          ) : (
+            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Cliquez sur un dossier en attente ci-dessous pour qu&apos;il bloque cette tâche jusqu&apos;à réception du retour.</span>
+            </div>
+          )}
+
+          {/* Search bar */}
+          <div className="space-y-2 pt-1">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+              <Input
+                placeholder="Rechercher parmi les dossiers en attente ou interlocuteurs..."
+                value={waitingSearch}
+                onChange={e => setWaitingSearch(e.target.value)}
+                className="pl-9 h-9 text-xs"
+              />
+            </div>
+
+            {/* Waiting items list */}
+            <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100">
+              {filteredWaitingTasks.length === 0 ? (
+                <p className="text-xs text-slate-400 italic text-center py-4">
+                  Aucun dossier en attente de retour externe trouvé.
+                </p>
+              ) : (
+                filteredWaitingTasks.map(t => {
+                  const isSelected = value.prereqTaskId === t.id
+                  const wInfo = parseWaitingInfo(t.description)
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => onChange({ ...value, prereqTaskId: t.id })}
+                      className={cn(
+                        "p-2.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-3 text-left group",
+                        isSelected
+                          ? "border-amber-500 bg-amber-50/80 ring-1 ring-amber-400 shadow-2xs"
+                          : "border-slate-200 hover:border-amber-300 hover:bg-amber-50/30 bg-white"
+                      )}
+                    >
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-xs text-slate-900 truncate">
+                            {t.title}
+                          </span>
+                          {wInfo.waitingOn && (
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold">
+                              Attente : {wInfo.waitingOn}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                          <span className={cn("px-1.5 py-0.2 rounded font-medium", STATUS_COLORS[t.status])}>
+                            {t.status}
+                          </span>
+                          {t.priority === 'haute' && (
+                            <span className="text-red-600 font-bold flex items-center gap-0.5">
+                              <Flame className="w-3 h-3" /> Haute
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0">
+                        <div className={cn(
+                          "w-5 h-5 rounded-full border flex items-center justify-center transition-colors",
+                          isSelected ? "bg-amber-600 border-amber-600 text-white" : "border-slate-300 group-hover:border-amber-400 bg-white"
+                        )}>
+                          {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-500 italic">
+            ℹ️ Cette tâche restera bloquée tant que le dossier sélectionné est en attente de retour externe. Dès que vous recevez la réponse et repassez le dossier &laquo;&nbsp;En cours&nbsp;&raquo;, cette tâche sera automatiquement débloquée !
+          </p>
         </div>
       )}
 

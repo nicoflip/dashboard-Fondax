@@ -15,6 +15,7 @@ import {
 } from '@/lib/utils'
 import { Task, CalendarEvent, TaskStatus } from '@/lib/types'
 import { checkTaskBlocked } from '@/lib/blockers'
+import { getTaskWaitingDetails } from '@/lib/waiting'
 import { 
   Trash2, 
   CheckCircle2, 
@@ -36,6 +37,7 @@ interface TaskCardProps {
   onDelete: (taskId: string) => void
   onSchedule: (task: Task) => void
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void
+  onManageWaiting?: (task: Task) => void
 }
 
 export function TaskCard({
@@ -45,13 +47,17 @@ export function TaskCard({
   onEdit,
   onDelete,
   onSchedule,
-  onStatusChange
+  onStatusChange,
+  onManageWaiting
 }: TaskCardProps) {
   const isAttente = task.status === 'en attente de retour externe'
   const isFait = task.status === 'fait'
   const isEnCours = task.status === 'en cours'
   const isHighPrio = task.priority === 'haute'
   const isUrgent = isHighPrio && !isFait
+
+  // Métriques de gestion d'attente & relances
+  const { info: waitingInfo, metrics: waitingMetrics } = getTaskWaitingDetails(task)
 
   // Évaluation des conditions de blocage
   const { isBlocked, blocker, prereqTask, prereqEvent, unlockDate } = checkTaskBlocked(
@@ -66,7 +72,11 @@ export function TaskCard({
     : isUrgent 
     ? 'border-l-[6px] border-l-red-600 border-red-300 ring-2 ring-red-400/40 shadow-md shadow-red-100/70' 
     : isAttente 
-    ? 'border-l-4 border-amber-500' 
+    ? (waitingMetrics.isDragging 
+        ? 'border-l-[6px] border-l-red-600 border-red-200 ring-1 ring-red-300 shadow-xs' 
+        : waitingMetrics.isWarning
+        ? 'border-l-4 border-amber-600'
+        : 'border-l-4 border-amber-500')
     : isFait 
     ? 'border-l-4 border-slate-300 opacity-60 bg-slate-50' 
     : isEnCours 
@@ -78,7 +88,7 @@ export function TaskCard({
     : isUrgent 
     ? 'bg-gradient-to-br from-red-50/70 via-white to-red-50/30' 
     : isAttente 
-    ? 'bg-amber-50/40' 
+    ? (waitingMetrics.isDragging ? 'bg-gradient-to-br from-red-50/60 via-amber-50/30 to-white' : 'bg-amber-50/40') 
     : isFait 
     ? 'bg-slate-50/90' 
     : 'bg-white'
@@ -108,6 +118,8 @@ export function TaskCard({
                 <span title="Bloquée jusqu'à une date"><Lock className="w-4 h-4 text-amber-600 shrink-0" /></span>
               ) : blocker.type === 'event' ? (
                 <span title="Bloquée par un événement"><Calendar className="w-4 h-4 text-purple-600 shrink-0" /></span>
+              ) : blocker.type === 'waiting' ? (
+                <span title="Bloquée par un retour tiers en attente"><Hourglass className="w-4 h-4 text-amber-600 shrink-0 animate-pulse" /></span>
               ) : (
                 <span title="Bloquée par une autre tâche"><Hourglass className="w-4 h-4 text-slate-400 shrink-0" /></span>
               )
@@ -126,6 +138,17 @@ export function TaskCard({
             </CardTitle>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {isAttente && onManageWaiting && (
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                title="Gérer l'attente et les relances" 
+                onClick={() => onManageWaiting(task)} 
+                className="h-8 w-8 text-amber-600 hover:text-amber-800 hover:bg-amber-100/70 cursor-pointer"
+              >
+                <Hourglass className="h-4 w-4" />
+              </Button>
+            )}
             <Button 
               variant="ghost" 
               size="icon" 
@@ -158,7 +181,14 @@ export function TaskCard({
         
         {/* Badges explicatifs de blocage par prérequis */}
         {isBlocked && (
-          blocker.type === 'task' && prereqTask ? (
+          blocker.type === 'waiting' && prereqTask ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50/90 text-amber-950 border border-amber-300 px-2.5 py-1 text-xs font-semibold w-fit shadow-2xs">
+              <Hourglass className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              <span>
+                ⏳ Bloquée : en attente du retour {getTaskWaitingDetails(prereqTask).info.waitingOn ? `de ${getTaskWaitingDetails(prereqTask).info.waitingOn}` : `sur « ${prereqTask.title} »`}
+              </span>
+            </div>
+          ) : blocker.type === 'task' && prereqTask ? (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50/90 text-amber-900 border border-amber-300 px-2.5 py-1 text-xs font-semibold w-fit shadow-2xs">
               <Hourglass className="w-3.5 h-3.5 text-amber-600 shrink-0" />
               <span>
@@ -184,7 +214,12 @@ export function TaskCard({
 
         {/* Badges de prérequis satisfait */}
         {!isBlocked && !isFait && (
-          blocker.type === 'task' && prereqTask ? (
+          blocker.type === 'waiting' && prereqTask ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 text-xs font-medium w-fit">
+              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>✓ Retour reçu {getTaskWaitingDetails(prereqTask).info.waitingOn ? `de ${getTaskWaitingDetails(prereqTask).info.waitingOn}` : `sur « ${prereqTask.title} »`} (Débloquée !)</span>
+            </div>
+          ) : blocker.type === 'task' && prereqTask ? (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 text-xs font-medium w-fit">
               <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               <span>✓ Prérequis validé : {prereqTask.title}</span>
@@ -203,11 +238,77 @@ export function TaskCard({
         )}
 
         {isAttente && (
-          <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-800 border border-amber-200 w-fit">
-            <Hourglass className="w-3.5 h-3.5" />
-            En attente retour externe
+          <div className={cn(
+            "mt-2.5 rounded-xl border p-2.5 space-y-2 text-xs transition-all",
+            waitingMetrics.isDragging 
+              ? "bg-red-50/90 border-red-300 text-red-950 shadow-2xs" 
+              : waitingMetrics.isWarning
+              ? "bg-amber-50 border-amber-300 text-amber-950"
+              : "bg-amber-50/60 border-amber-200 text-amber-900"
+          )}>
+            <div className="flex items-center justify-between gap-1">
+              <span className="font-bold flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-amber-950">
+                <Hourglass className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                La balle est dans leur camp
+              </span>
+              {waitingMetrics.isDragging ? (
+                <Badge className="bg-red-600 text-white text-[10px] font-black uppercase px-1.5 py-0 shadow-2xs">
+                  ⚠️ Traîne ({waitingMetrics.daysWaiting}j)
+                </Badge>
+              ) : (
+                <span className="text-[11px] font-medium text-slate-600">
+                  Attente : <strong>{waitingMetrics.daysWaiting}j</strong>
+                </span>
+              )}
+            </div>
+
+            <div className="text-xs font-semibold text-slate-900">
+              {waitingInfo.waitingOn ? (
+                <span>En attente de : <strong className="underline decoration-amber-400 font-bold">{waitingInfo.waitingOn}</strong></span>
+              ) : (
+                <span className="italic text-slate-500">En attente d&apos;un retour tiers</span>
+              )}
+            </div>
+
+            {/* Statut relance & bouton d'action */}
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-amber-200/60">
+              <div className="text-[11px]">
+                {waitingMetrics.followUpStatus === 'overdue' && (
+                  <span className="font-bold text-red-700 flex items-center gap-1">
+                    🚨 Relance en retard ({Math.abs(waitingMetrics.daysDiffFollowUp || 0)}j)
+                  </span>
+                )}
+                {waitingMetrics.followUpStatus === 'today' && (
+                  <span className="font-bold text-amber-800 flex items-center gap-1">
+                    🔔 À relancer aujourd&apos;hui !
+                  </span>
+                )}
+                {waitingMetrics.followUpStatus === 'upcoming' && (
+                  <span className="text-slate-600">
+                    Relance : <strong>{waitingMetrics.formattedFollowUpDate}</strong>
+                  </span>
+                )}
+                {waitingMetrics.followUpStatus === 'none' && (
+                  <span className="text-slate-400 italic">Pas de relance fixée</span>
+                )}
+              </div>
+
+              {onManageWaiting && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onManageWaiting(task)
+                  }}
+                  className="text-[11px] px-2 py-0.5 rounded font-semibold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 cursor-pointer transition-colors shadow-2xs shrink-0"
+                >
+                  Gérer relance &rarr;
+                </button>
+              )}
+            </div>
           </div>
         )}
+
         {isFait && (
           <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-medium text-slate-600 border border-slate-300 w-fit">
             <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -216,11 +317,11 @@ export function TaskCard({
         )}
 
         <CardDescription className="line-clamp-2 mt-2">
-          {blocker.cleanDescription ? (
+          {(isAttente ? waitingInfo.cleanDescription : blocker.cleanDescription) ? (
             isBlocked ? (
               <span className="text-slate-500 italic">{blocker.cleanDescription}</span>
             ) : isAttente ? (
-              <span className="text-amber-900 font-medium">{blocker.cleanDescription}</span> 
+              <span className="text-amber-900 font-medium">{waitingInfo.cleanDescription}</span> 
             ) : isUrgent ? (
               <span className="text-slate-800 font-medium">{blocker.cleanDescription}</span>
             ) : isFait ? (

@@ -160,7 +160,7 @@ export interface Note {
 }
 
 // Types pour les prérequis et bloqueurs de tâches
-export type BlockerType = 'none' | 'task' | 'event' | 'date'
+export type BlockerType = 'none' | 'task' | 'event' | 'date' | 'waiting'
 
 export interface BlockerConfig {
   type: BlockerType
