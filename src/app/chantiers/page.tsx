@@ -537,6 +537,7 @@ function ChantiersContent() {
         open={!!activeWorkspaceProject} 
         onClose={() => setActiveWorkspaceProject(null)}
         className="max-w-4xl p-0 overflow-hidden"
+        hideCloseButton
       >
         {activeWorkspaceProject && (
           <div className="flex flex-col h-[85vh] max-h-[750px]">

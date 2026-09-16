@@ -158,3 +158,39 @@ export interface Note {
   created_at: string
   updated_at: string
 }
+
+// Types pour les prérequis et bloqueurs de tâches
+export type BlockerType = 'none' | 'task' | 'event' | 'date'
+
+export interface BlockerConfig {
+  type: BlockerType
+  prereqTaskId?: string
+  requiredStatus: TaskStatus
+  prereqEventId?: string
+  unlockDate?: string
+}
+
+export interface TaskBlockerInfo {
+  type: BlockerType
+  prereqTaskId?: string
+  requiredStatus: TaskStatus
+  prereqEventId?: string
+  unlockDate?: string
+  cleanDescription: string
+}
+
+export interface TaskBlockedStatus {
+  isBlocked: boolean
+  blocker: TaskBlockerInfo
+  prereqTask?: Task
+  prereqEvent?: CalendarEvent
+  unlockDate?: string
+}
+
+// Types pour les événements à période flexible
+export interface FlexibleEventInfo {
+  isFlexible: boolean
+  flexLabel: string
+  cleanDesc: string
+}
+

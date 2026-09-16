@@ -10,19 +10,8 @@ import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate } fro
 import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban } from 'lucide-react'
 import { Task, Project, CalendarEvent } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
+import { parseFlexibleEvent } from '@/lib/flexible-events'
 
-function parseFlexibleEvent(desc: string | null | undefined) {
-  if (!desc) return { isFlexible: false, flexLabel: '', cleanDesc: '' }
-  const match = desc.match(/^\[Période flexible\s*:\s*([^\]]+)\]\s*\n?([\s\S]*)$/i)
-  if (match) {
-    return {
-      isFlexible: true,
-      flexLabel: match[1].trim(),
-      cleanDesc: match[2].trim()
-    }
-  }
-  return { isFlexible: false, flexLabel: '', cleanDesc: desc }
-}
 
 export default function Dashboard() {
   const supabase = createClient()

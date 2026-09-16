@@ -2,7 +2,11 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
-  const isLoginPage = request.nextUrl.pathname.startsWith('/login')
+  const pathname = request.nextUrl.pathname
+  const isLoginPage = pathname.startsWith('/login')
+  const isRegisterPage = pathname.startsWith('/creer-compte')
+  const isAuthCallback = pathname.startsWith('/auth')
+  const isPublicPage = isLoginPage || isRegisterPage || isAuthCallback
 
   // Check if any Supabase auth cookie is present
   const allCookies = request.cookies.getAll()
@@ -10,7 +14,7 @@ export async function middleware(request: NextRequest) {
 
   // FAST PATH: If no auth cookie exists, avoid making any remote network call!
   if (!hasAuthCookie) {
-    if (isLoginPage) {
+    if (isPublicPage) {
       return NextResponse.next()
     }
     const loginUrl = request.nextUrl.clone()
@@ -62,8 +66,8 @@ export async function middleware(request: NextRequest) {
     console.warn('Middleware auth verification skipped or timed out:', err)
   }
 
-  // Rediriger vers /login si non authentifié
-  if (!user && !isLoginPage) {
+  // Rediriger vers /login si non authentifié et hors page publique
+  if (!user && !isPublicPage) {
     const loginUrl = request.nextUrl.clone()
     loginUrl.pathname = '/login'
     return NextResponse.redirect(loginUrl)

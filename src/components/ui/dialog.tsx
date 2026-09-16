@@ -10,9 +10,10 @@ interface DialogProps {
   onOpenChange?: (open: boolean) => void
   children: React.ReactNode
   className?: string
+  hideCloseButton?: boolean
 }
 
-function Dialog({ open, onClose, onOpenChange, children, className }: DialogProps) {
+function Dialog({ open, onClose, onOpenChange, children, className, hideCloseButton = false }: DialogProps) {
   const handleClose = useCallback(() => {
     onClose?.()
     onOpenChange?.(false)
@@ -54,12 +55,14 @@ function Dialog({ open, onClose, onOpenChange, children, className }: DialogProp
           className
         )}
       >
-        <button
-          onClick={handleClose}
-          className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        {!hideCloseButton && (
+          <button
+            onClick={handleClose}
+            className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
         {children}
       </div>
     </div>

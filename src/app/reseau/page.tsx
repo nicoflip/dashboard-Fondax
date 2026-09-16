@@ -288,8 +288,41 @@ const EquipmentNode = React.memo(({ data, selected }: { data: any; selected?: bo
         handleClassName="!h-2.5 !w-2.5 !bg-white !border-2 !border-blue-600 !rounded-xs shadow-xs"
       />
 
-      <Handle type="target" position={Position.Top} className="w-2.5 h-2.5 !bg-slate-400 hover:!bg-blue-600 transition-colors" />
-      <Handle type="target" position={Position.Left} className="w-2.5 h-2.5 !bg-slate-400 hover:!bg-blue-600 transition-colors" />
+      {/* Top handles */}
+      <Handle 
+        type="target" 
+        position={Position.Top} 
+        id="top-target"
+        style={{ left: '38%' }}
+        className="w-2.5 h-2.5 !bg-slate-400 hover:!bg-blue-600 transition-colors cursor-crosshair" 
+        title="Entrée haut (vers cet équipement)"
+      />
+      <Handle 
+        type="source" 
+        position={Position.Top} 
+        id="top-source"
+        style={{ left: '62%' }}
+        className="w-2.5 h-2.5 !bg-blue-500 hover:!bg-blue-700 transition-colors cursor-crosshair" 
+        title="Faire partir un lien par le haut"
+      />
+
+      {/* Left handles (permet de faire partir ou recevoir des liens par le côté gauche) */}
+      <Handle 
+        type="target" 
+        position={Position.Left} 
+        id="left-target"
+        style={{ top: '38%' }}
+        className="w-2.5 h-2.5 !bg-slate-400 hover:!bg-blue-600 transition-colors cursor-crosshair" 
+        title="Entrée gauche (vers cet équipement)"
+      />
+      <Handle 
+        type="source" 
+        position={Position.Left} 
+        id="left-source"
+        style={{ top: '62%' }}
+        className="w-2.5 h-2.5 !bg-blue-500 hover:!bg-blue-700 transition-colors cursor-crosshair" 
+        title="Faire partir un lien par la gauche"
+      />
 
       {/* Header */}
       <div className={cn("p-2.5 border-b flex items-center justify-between gap-2", cfg.headerBg)}>
@@ -346,8 +379,41 @@ const EquipmentNode = React.memo(({ data, selected }: { data: any; selected?: bo
         )}
       </div>
 
-      <Handle type="source" position={Position.Bottom} className="w-2.5 h-2.5 !bg-slate-400 hover:!bg-blue-600 transition-colors" />
-      <Handle type="source" position={Position.Right} className="w-2.5 h-2.5 !bg-slate-400 hover:!bg-blue-600 transition-colors" />
+      {/* Right handles (permet de faire partir ou recevoir des liens par le côté droit) */}
+      <Handle 
+        type="target" 
+        position={Position.Right} 
+        id="right-target"
+        style={{ top: '38%' }}
+        className="w-2.5 h-2.5 !bg-slate-400 hover:!bg-blue-600 transition-colors cursor-crosshair" 
+        title="Entrée droite (vers cet équipement)"
+      />
+      <Handle 
+        type="source" 
+        position={Position.Right} 
+        id="right-source"
+        style={{ top: '62%' }}
+        className="w-2.5 h-2.5 !bg-blue-500 hover:!bg-blue-700 transition-colors cursor-crosshair" 
+        title="Faire partir un lien par la droite"
+      />
+
+      {/* Bottom handles */}
+      <Handle 
+        type="target" 
+        position={Position.Bottom} 
+        id="bottom-target"
+        style={{ left: '38%' }}
+        className="w-2.5 h-2.5 !bg-slate-400 hover:!bg-blue-600 transition-colors cursor-crosshair" 
+        title="Entrée bas (vers cet équipement)"
+      />
+      <Handle 
+        type="source" 
+        position={Position.Bottom} 
+        id="bottom-source"
+        style={{ left: '62%' }}
+        className="w-2.5 h-2.5 !bg-blue-500 hover:!bg-blue-700 transition-colors cursor-crosshair" 
+        title="Faire partir un lien par le bas"
+      />
     </div>
   )
 })
@@ -613,22 +679,34 @@ function computeOptimalLayout(
   const centerX = 520
   const positions: Record<string, { x: number; y: number }> = {}
 
-  if (box) positions[box.id] = { x: centerX, y: 60 }
+  if (box) positions[box.id] = { x: centerX, y: 50 }
   if (firewall) positions[firewall.id] = { x: centerX, y: 230 }
-  if (mainSwitch) positions[mainSwitch.id] = { x: centerX, y: 400 }
+  if (mainSwitch) positions[mainSwitch.id] = { x: centerX, y: 420 }
 
-  if (nas) positions[nas.id] = { x: 140, y: 580 }
+  // Services Tier (NAS, VoIP, Ricoh printer)
+  const printer = otherEquip.find(e => (e.name || '').toLowerCase().includes('ricoh') || (e.name || '').toLowerCase().includes('imprimante') || e.type === 'Imprimante')
+  if (nas) positions[nas.id] = { x: 160, y: 580 }
   if (voip) positions[voip.id] = { x: centerX, y: 580 }
-  if (deco1) positions[deco1.id] = { x: 900, y: 580 }
-  if (deco2) positions[deco2.id] = { x: 900, y: 760 }
+  if (printer) {
+    positions[printer.id] = { x: 840, y: 580 }
+    handledIds.add(printer.id)
+  }
 
-  // Other endpoints (Workstations, Printers, IoT) avoiding Deco 2 at (900, 760)
-  const endpointCols = [140, 390, 640]
-  otherEquip.forEach((eq, idx) => {
+  // Deco Mesh Wi-Fi (placed clearly in their dedicated zone on the right)
+  if (deco1) positions[deco1.id] = { x: 1160, y: 480 }
+  if (deco2) positions[deco2.id] = { x: 1160, y: 680 }
+
+  // Other endpoints (Workstations, PCs, IoT) in a balanced 4-column grid
+  const workstations = equipList.filter(e => !handledIds.has(e.id))
+  const endpointCols = [80, 320, 560, 800]
+  let maxEndpointY = 750
+
+  workstations.forEach((eq, idx) => {
     const row = Math.floor(idx / endpointCols.length)
     const col = idx % endpointCols.length
-    const yPos = 760 + row * 170
+    const yPos = 750 + row * 160
     positions[eq.id] = { x: endpointCols[col], y: yPos }
+    if (yPos > maxEndpointY) maxEndpointY = yPos
   })
 
   // 3. Add equipment nodes
@@ -682,6 +760,8 @@ function computeOptimalLayout(
 
   // 5. Translucent Bounding Frames for Networks (Englobing several devices)
   if (showNetworks) {
+    const prodLanHeight = Math.max(680, maxEndpointY - 370 + 170)
+
     networkList.forEach((net, idx) => {
       const netNodeId = `net-${net.id}`
       const isLocked = lockedNetworkIds?.has(netNodeId) ?? false
@@ -693,21 +773,21 @@ function computeOptimalLayout(
       let frameStyle: Record<string, any> = { width: 350, height: 250 }
 
       if (ssidLow.includes('sfr') || ssidLow.includes('fibre') || notesLow.includes('sfr')) {
-        // Encompasses Box SFR Business
-        netPos = { x: 440, y: 15 }
-        frameStyle = { width: 380, height: 180 }
+        // Encompasses Box SFR Business WAN
+        netPos = { x: 380, y: 10 }
+        frameStyle = { width: 480, height: 160 }
       } else if (ssidLow.includes('client') || roleLow.includes('invité') || notesLow.includes('vlan')) {
-        // Encompasses Sophos Firewall guest VLAN zone
-        netPos = { x: 440, y: 205 }
-        frameStyle = { width: 380, height: 155 }
+        // Encompasses Sophos Firewall guest VLAN zone (positioned to the right, non-overlapping)
+        netPos = { x: 860, y: 170 }
+        frameStyle = { width: 340, height: 170 }
       } else if (ssidLow.includes('fondax') || roleLow.includes('prod') || roleLow.includes('interne')) {
         // Encompasses Switch, NAS, VoIP, Workstations & Printers (Production LAN)
-        netPos = { x: 80, y: 360 }
-        frameStyle = { width: 780, height: 650 }
+        netPos = { x: 40, y: 370 }
+        frameStyle = { width: 990, height: prodLanHeight }
       } else if (ssidLow.includes('bureau') || roleLow.includes('mesh') || notesLow.includes('deco')) {
-        // Encompasses Deco 1 & Deco 2
-        netPos = { x: 860, y: 520 }
-        frameStyle = { width: 290, height: 420 }
+        // Encompasses Deco 1 & Deco 2 (Deco Mesh Wi-Fi zone)
+        netPos = { x: 1090, y: 410 }
+        frameStyle = { width: 330, height: 420 }
       }
 
       nodes.push({

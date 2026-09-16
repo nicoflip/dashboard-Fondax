@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import dynamic from 'next/dynamic'
-import { CalendarEvent, Task, Vendor, EventType, EventStatus } from '@/lib/types'
+import { CalendarEvent, Task, Vendor, EventType, EventStatus, TaskCategory, TaskPriority } from '@/lib/types'
 import dayGridPlugin from '@fullcalendar/daygrid'
 import interactionPlugin from '@fullcalendar/interaction'
 
@@ -56,24 +56,14 @@ import {
   EVENT_TYPE_LABELS, 
   formatDate, 
   cn, 
-  PRIORITY_COLORS 
+  PRIORITY_COLORS,
+  TASK_CATEGORIES,
+  TASK_PRIORITIES
 } from '@/lib/utils'
-
-// Helper: parse flexible tags in description
-function parseFlexibleEvent(desc: string | null | undefined) {
-  if (!desc) return { isFlexible: false, flexLabel: '', cleanDesc: '' }
-  const match = desc.match(/^\[Période flexible\s*:\s*([^\]]+)\]\s*\n?([\s\S]*)$/i)
-  if (match) {
-    return {
-      isFlexible: true,
-      flexLabel: match[1].trim(),
-      cleanDesc: match[2].trim()
-    }
-  }
-  return { isFlexible: false, flexLabel: '', cleanDesc: desc }
-}
+import { parseFlexibleEvent } from '@/lib/flexible-events'
 
 // Helper: Format YYYY-MM-DD
+
 function toYMD(d: Date): string {
   const year = d.getFullYear()
   const month = String(d.getMonth() + 1).padStart(2, '0')
@@ -186,7 +176,7 @@ function CalendrierInner() {
 
   // View mode: 'calendar' | 'agenda' | 'flexible'
   const [activeTab, setActiveTab] = useState<'calendar' | 'agenda' | 'flexible'>('calendar')
-  const [calendarViewMode, setCalendarViewMode] = useState<'dayGridMonth' | 'dayGridWeek'>('dayGridMonth')
+  const [calendarViewMode, setCalendarViewMode] = useState<'dayGridThreeWeeks' | 'dayGridTwoWeeks' | 'dayGridWeek' | 'dayGridMonth'>('dayGridThreeWeeks')
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<string>('TOUS')
@@ -210,6 +200,17 @@ function CalendrierInner() {
   const [formStatus, setFormStatus] = useState<EventStatus>('à venir')
   const [formTaskId, setFormTaskId] = useState('')
   const [formVendorId, setFormVendorId] = useState('')
+
+  // Option: Créer la tâche éponyme
+  const [createAlsoTask, setCreateAlsoTask] = useState(false)
+  const [formAlsoTaskCategory, setFormAlsoTaskCategory] = useState<TaskCategory>('Autre')
+  const [formAlsoTaskPriority, setFormAlsoTaskPriority] = useState<TaskPriority>('moyenne')
+  const [notificationMsg, setNotificationMsg] = useState<string | null>(null)
+
+  const showNotification = (msg: string) => {
+    setNotificationMsg(msg)
+    setTimeout(() => setNotificationMsg(null), 4000)
+  }
 
   useEffect(() => {
     if (urlFilter === 'a_venir') {
@@ -250,6 +251,9 @@ function CalendrierInner() {
     setFormStatus('à venir')
     setFormTaskId('')
     setFormVendorId('')
+    setCreateAlsoTask(false)
+    setFormAlsoTaskCategory('Autre')
+    setFormAlsoTaskPriority('moyenne')
     setIsDialogOpen(true)
   }
 
@@ -273,17 +277,21 @@ function CalendrierInner() {
     setFormStatus(event.status)
     setFormTaskId(event.task_id || '')
     setFormVendorId(event.vendor_id || '')
+    setCreateAlsoTask(false)
     setIsDialogOpen(true)
   }
 
   // Auto-fill title from task if empty
   const handleSelectTask = (tid: string) => {
     setFormTaskId(tid)
-    if (tid && !formTitle) {
-      const t = tasks.find(item => item.id === tid)
-      if (t) {
-        setFormTitle(t.title)
-        if (!formDescription && t.description) setFormDescription(t.description)
+    if (tid) {
+      setCreateAlsoTask(false)
+      if (!formTitle) {
+        const t = tasks.find(item => item.id === tid)
+        if (t) {
+          setFormTitle(t.title)
+          if (!formDescription && t.description) setFormDescription(t.description)
+        }
       }
     }
   }
@@ -319,12 +327,37 @@ function CalendrierInner() {
       if (!error) {
         setIsDialogOpen(false)
         fetchEvents()
+        showNotification(`Événement mis à jour avec succès !`)
       }
     } else {
+      if (createAlsoTask) {
+        const cat = formAlsoTaskCategory || (formVendorId ? 'Prestataires' : 'Autre')
+        const { data: createdTask, error: taskError } = await supabase
+          .from('tasks')
+          .insert([{
+            title: formTitle.trim(),
+            description: finalDesc || null,
+            category: cat,
+            priority: formAlsoTaskPriority,
+            status: 'à faire'
+          }])
+          .select()
+          .single()
+
+        if (!taskError && createdTask) {
+          payload.task_id = createdTask.id
+        }
+      }
+
       const { error } = await supabase.from('events').insert([payload])
       if (!error) {
         setIsDialogOpen(false)
         fetchEvents()
+        if (createAlsoTask) {
+          showNotification(`Événement et tâche éponyme créés avec succès !`)
+        } else {
+          showNotification(`Événement créé avec succès !`)
+        }
       }
     }
   }
@@ -518,6 +551,14 @@ function CalendrierInner() {
         </Button>
       </div>
 
+      {/* Notification banner */}
+      {notificationMsg && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm p-3.5 rounded-xl flex items-center gap-2.5 shadow-xs animate-in fade-in">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          <span className="font-medium">{notificationMsg}</span>
+        </div>
+      )}
+
       {/* KPI Cards Bar */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
@@ -610,20 +651,30 @@ function CalendrierInner() {
               </button>
             </div>
 
-            {/* In Calendar Tab: Month / Week view toggle */}
+            {/* In Calendar Tab: 3 weeks / 2 weeks / 1 week toggle */}
             {activeTab === 'calendar' && (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500 font-medium">Affichage :</span>
+                <span className="text-xs text-slate-500 font-medium">Horizon :</span>
                 <div className="flex items-center p-0.5 bg-slate-100 rounded-md">
                   <button
                     type="button"
-                    onClick={() => setCalendarViewMode('dayGridMonth')}
+                    onClick={() => setCalendarViewMode('dayGridThreeWeeks')}
                     className={cn(
                       "px-2.5 py-1 text-xs font-medium rounded cursor-pointer transition-colors",
-                      calendarViewMode === 'dayGridMonth' ? "bg-white text-slate-900 shadow-2xs font-semibold" : "text-slate-500 hover:text-slate-900"
+                      calendarViewMode === 'dayGridThreeWeeks' ? "bg-white text-slate-900 shadow-2xs font-semibold" : "text-slate-500 hover:text-slate-900"
                     )}
                   >
-                    Mois
+                    3 semaines
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCalendarViewMode('dayGridTwoWeeks')}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-medium rounded cursor-pointer transition-colors",
+                      calendarViewMode === 'dayGridTwoWeeks' ? "bg-white text-slate-900 shadow-2xs font-semibold" : "text-slate-500 hover:text-slate-900"
+                    )}
+                  >
+                    2 semaines
                   </button>
                   <button
                     type="button"
@@ -633,7 +684,7 @@ function CalendrierInner() {
                       calendarViewMode === 'dayGridWeek' ? "bg-white text-slate-900 shadow-2xs font-semibold" : "text-slate-500 hover:text-slate-900"
                     )}
                   >
-                    Semaine
+                    1 semaine
                   </button>
                 </div>
               </div>
@@ -709,12 +760,34 @@ function CalendrierInner() {
           <div className="lg:col-span-8">
             <Card className="border-slate-200 shadow-sm overflow-hidden bg-white">
               <CardContent className="p-4 sm:p-5">
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 text-xs text-slate-500">
+                  <span className="flex items-center gap-1.5 font-medium text-slate-600">
+                    <span className="w-2 h-2 rounded-full bg-blue-600" />
+                    Vue ciblée : <strong>Lundi au Jeudi inclus</strong>
+                  </span>
+                  <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[11px] font-medium">
+                    Horizon : {calendarViewMode === 'dayGridThreeWeeks' ? '3 prochaines semaines' : calendarViewMode === 'dayGridTwoWeeks' ? '2 prochaines semaines' : 'Semaine en cours'}
+                  </span>
+                </div>
                 <FullCalendar
                   key={calendarViewMode}
                   plugins={[dayGridPlugin, interactionPlugin]}
                   initialView={calendarViewMode}
                   locale="fr"
                   firstDay={1}
+                  hiddenDays={[0, 5, 6]}
+                  views={{
+                    dayGridThreeWeeks: {
+                      type: 'dayGrid',
+                      duration: { weeks: 3 },
+                      buttonText: '3 semaines'
+                    },
+                    dayGridTwoWeeks: {
+                      type: 'dayGrid',
+                      duration: { weeks: 2 },
+                      buttonText: '2 semaines'
+                    }
+                  }}
                   buttonText={{
                     today: "Aujourd'hui",
                     month: 'Mois',
@@ -1214,11 +1287,18 @@ function CalendrierInner() {
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Lier à une tâche IT</Label>
                 <select
+                  disabled={createAlsoTask}
                   value={formTaskId}
                   onChange={e => handleSelectTask(e.target.value)}
-                  className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs truncate focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  className={cn(
+                    "flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs truncate focus:outline-none focus:ring-2 focus:ring-blue-600",
+                    createAlsoTask && "opacity-60 bg-slate-100 cursor-not-allowed"
+                  )}
+                  title={createAlsoTask ? "Désactivé : une tâche éponyme sera créée et liée automatiquement" : undefined}
                 >
-                  <option value="">-- Aucune tâche liée --</option>
+                  <option value="">
+                    {createAlsoTask ? "-- Tâche éponyme créée automatiquement --" : "-- Aucune tâche liée --"}
+                  </option>
                   {tasks.map(t => (
                     <option key={t.id} value={t.id}>
                       [{t.category}] {t.title}
@@ -1243,6 +1323,71 @@ function CalendrierInner() {
                 </select>
               </div>
             </div>
+
+            {/* Option : Créer également la tâche éponyme */}
+            {!editingEvent && (
+              <div className={cn(
+                "rounded-xl border p-3.5 transition-all",
+                createAlsoTask ? "bg-blue-50/60 border-blue-200 shadow-2xs" : "bg-slate-50/60 border-slate-200"
+              )}>
+                <label className="flex items-start gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={createAlsoTask}
+                    onChange={e => {
+                      const checked = e.target.checked
+                      setCreateAlsoTask(checked)
+                      if (checked) {
+                        setFormTaskId('')
+                      }
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div className="space-y-0.5 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-800">
+                        Créer également la tâche éponyme
+                      </span>
+                      <Badge variant="outline" className="text-[10px] bg-white text-blue-700 border-blue-200 py-0">
+                        Synchro Tâches
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-tight">
+                      Une tâche intitulée &laquo;&nbsp;{formTitle.trim() || "même titre"}&nbsp;&raquo; sera automatiquement ajoutée dans vos tâches et rattachée à cet événement.
+                    </p>
+                  </div>
+                </label>
+
+                {createAlsoTask && (
+                  <div className="mt-3 pt-3 border-t border-blue-100 grid grid-cols-1 sm:grid-cols-2 gap-3 pl-7">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-slate-700">Catégorie de la tâche</Label>
+                      <select
+                        value={formAlsoTaskCategory}
+                        onChange={e => setFormAlsoTaskCategory(e.target.value as TaskCategory)}
+                        className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      >
+                        {TASK_CATEGORIES.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold text-slate-700">Priorité de la tâche</Label>
+                      <select
+                        value={formAlsoTaskPriority}
+                        onChange={e => setFormAlsoTaskPriority(e.target.value as TaskPriority)}
+                        className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-600"
+                      >
+                        {TASK_PRIORITIES.map(p => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Description */}
             <div className="space-y-1.5">
