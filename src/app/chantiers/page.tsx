@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
+import { CustomDatePicker } from '@/components/ui/date-picker'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { PROJECT_STATUS_COLORS, PRIORITY_COLORS, STATUS_COLORS, cn } from '@/lib/utils'
 import { Project, ProjectStatus, Task, TaskPriority, TaskStatus, CalendarEvent } from '@/lib/types'
@@ -766,12 +767,11 @@ function ChantiersContent() {
                         />
                       </div>
                       <div>
-                        <Input
-                          type="date"
+                        <CustomDatePicker
                           value={newEventDate}
-                          onChange={e => setNewEventDate(e.target.value)}
-                          className="text-xs"
-                          required
+                          onChange={setNewEventDate}
+                          placeholder="Date de l'étape"
+                          className="text-xs h-9"
                         />
                       </div>
                     </div>

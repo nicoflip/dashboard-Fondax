@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Task, TaskStatus } from '@/lib/types'
+import { CustomDatePicker } from '@/components/ui/date-picker'
 import {
   parseWaitingInfo,
   formatTaskDescriptionWithWaiting,
@@ -264,11 +265,10 @@ export function TaskWaitingDialog({
               <span>Quand devez-vous relancer ?</span>
             </Label>
             <div className="flex gap-2">
-              <Input
-                id="followup-date"
-                type="date"
+              <CustomDatePicker
                 value={followUpDate}
-                onChange={(e) => setFollowUpDate(e.target.value)}
+                onChange={setFollowUpDate}
+                placeholder="Sélectionner une date de relance"
                 className="h-9 text-xs flex-1"
               />
             </div>

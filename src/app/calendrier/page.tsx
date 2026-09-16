@@ -28,6 +28,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent } from '@/components/ui/dialog'
 import { CustomDatePicker } from '@/components/ui/date-picker'
+import { TaskSelector } from '@/components/ui/TaskSelector'
 import { 
   Calendar as CalendarIcon, 
   Plus, 
@@ -48,7 +49,8 @@ import {
   Hourglass, 
   Check, 
   AlertCircle,
-  X
+  X,
+  Building2
 } from 'lucide-react'
 import { 
   EVENT_TYPES, 
@@ -282,12 +284,13 @@ function CalendrierInner() {
   }
 
   // Auto-fill title from task if empty
-  const handleSelectTask = (tid: string) => {
-    setFormTaskId(tid)
-    if (tid) {
+  const handleSelectTask = (tid: string | null) => {
+    const id = tid || ''
+    setFormTaskId(id)
+    if (id) {
       setCreateAlsoTask(false)
       if (!formTitle) {
-        const t = tasks.find(item => item.id === tid)
+        const t = tasks.find(item => item.id === id)
         if (t) {
           setFormTitle(t.title)
           if (!formDescription && t.description) setFormDescription(t.description)
@@ -1282,46 +1285,35 @@ function CalendrierInner() {
               )}
             </div>
 
-            {/* Liaison Tâche & Prestataire */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Lier à une tâche IT</Label>
-                <select
-                  disabled={createAlsoTask}
-                  value={formTaskId}
-                  onChange={e => handleSelectTask(e.target.value)}
-                  className={cn(
-                    "flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs truncate focus:outline-none focus:ring-2 focus:ring-blue-600",
-                    createAlsoTask && "opacity-60 bg-slate-100 cursor-not-allowed"
-                  )}
-                  title={createAlsoTask ? "Désactivé : une tâche éponyme sera créée et liée automatiquement" : undefined}
-                >
-                  <option value="">
-                    {createAlsoTask ? "-- Tâche éponyme créée automatiquement --" : "-- Aucune tâche liée --"}
-                  </option>
-                  {tasks.map(t => (
-                    <option key={t.id} value={t.id}>
-                      [{t.category}] {t.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {/* Liaison Tâche IT */}
+            <TaskSelector
+              tasks={tasks}
+              value={formTaskId || null}
+              onChange={handleSelectTask}
+              disabled={createAlsoTask}
+              disabledMessage="Désactivé : une tâche éponyme sera créée et liée automatiquement"
+              label="Lier à une tâche IT (optionnel)"
+              placeholder="Rechercher et associer une tâche existante..."
+            />
 
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Lier à un prestataire</Label>
-                <select
-                  value={formVendorId}
-                  onChange={e => setFormVendorId(e.target.value)}
-                  className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs truncate focus:outline-none focus:ring-2 focus:ring-blue-600"
-                >
-                  <option value="">-- Aucun prestataire lié --</option>
-                  {vendors.map(v => (
-                    <option key={v.id} value={v.id}>
-                      {v.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {/* Liaison Prestataire */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-slate-500" />
+                Lier à un prestataire (optionnel)
+              </Label>
+              <select
+                value={formVendorId}
+                onChange={e => setFormVendorId(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs truncate focus:outline-none focus:ring-2 focus:ring-blue-600 font-medium"
+              >
+                <option value="">-- Aucun prestataire lié --</option>
+                {vendors.map(v => (
+                  <option key={v.id} value={v.id}>
+                    🏢 {v.name} ({v.scope || 'Prestataire'})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Option : Créer également la tâche éponyme */}

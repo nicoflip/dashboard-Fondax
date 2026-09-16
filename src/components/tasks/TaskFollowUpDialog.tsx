@@ -11,6 +11,9 @@ import { Task, Project, EventType } from '@/lib/types'
 import { createWaitingReturn } from '@/lib/waiting-returns'
 import { CheckCircle2, Calendar, FolderKanban, PlusCircle, ArrowRight, Clock, Hourglass, CalendarPlus, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { CustomDatePicker } from '@/components/ui/date-picker'
+import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
+import { formatFlexibleEventDescription } from '@/lib/flexible-events'
 
 interface TaskFollowUpDialogProps {
   task: Task | null
@@ -52,6 +55,10 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
   const [waitFollowUpDate, setWaitFollowUpDate] = useState('')
   const [waitDesc, setWaitDesc] = useState('')
   const [waitAddToCalendar, setWaitAddToCalendar] = useState(false)
+  const [waitCalIsFlexible, setWaitCalIsFlexible] = useState(false)
+  const [waitCalDate, setWaitCalDate] = useState('')
+  const [waitCalEndDate, setWaitCalEndDate] = useState('')
+  const [waitCalFlexLabel, setWaitCalFlexLabel] = useState('Dans les 2 prochaines semaines')
 
   const [saving, setSaving] = useState(false)
 
@@ -88,6 +95,10 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
       setWaitFollowUpDate('')
       setWaitDesc(`Fait suite à l'achèvement de la tâche : "${task.title}".`)
       setWaitAddToCalendar(false)
+      setWaitCalIsFlexible(false)
+      setWaitCalDate('')
+      setWaitCalEndDate('')
+      setWaitCalFlexLabel('Dans les 2 prochaines semaines')
 
       setSelectedAction('none')
     }
@@ -188,12 +199,23 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
       })
 
       if (created && waitAddToCalendar) {
-        const eventDate = waitFollowUpDate || new Date().toISOString().split('T')[0]
+        const finalEventDate = waitCalDate || waitFollowUpDate || new Date().toISOString().split('T')[0]
+        let finalEndDate = waitCalEndDate || null
+        if (waitCalIsFlexible && !finalEndDate) {
+          const d = new Date(finalEventDate + 'T00:00:00')
+          d.setDate(d.getDate() + 14)
+          finalEndDate = d.toISOString().split('T')[0]
+        }
+        const baseDesc = `Retour attendu suite à la tâche « ${task.title} ».`
+        const finalDesc = waitCalIsFlexible
+          ? formatFlexibleEventDescription(baseDesc, waitCalFlexLabel || 'Dans les 2 prochaines semaines')
+          : baseDesc
+
         await supabase.from('events').insert([{
           title: `Retour attendu : ${waitTitle.trim()} (${waitOn.trim()})`,
-          description: `Retour attendu suite à la tâche « ${task.title} ».`,
-          event_date: eventDate,
-          end_date: null,
+          description: finalDesc,
+          event_date: finalEventDate,
+          end_date: waitCalIsFlexible ? finalEndDate : null,
           event_type: 'échéance',
           status: 'à venir',
           task_id: task.id,
@@ -384,18 +406,18 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
                       <Label className="text-[11px] text-slate-600">Début estimé</Label>
-                      <Input type="date" value={calDate} onChange={e => setCalDate(e.target.value)} className="bg-white h-8 text-xs" />
+                      <CustomDatePicker value={calDate} onChange={setCalDate} placeholder="Date de début" className="bg-white h-8 text-xs" />
                     </div>
                     <div className="space-y-1">
                       <Label className="text-[11px] text-slate-600">Fin estimée</Label>
-                      <Input type="date" value={calEndDate} onChange={e => setCalEndDate(e.target.value)} className="bg-white h-8 text-xs" />
+                      <CustomDatePicker value={calEndDate} onChange={setCalEndDate} placeholder="Date de fin" className="bg-white h-8 text-xs" />
                     </div>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-1 pt-1">
                   <Label className="text-xs">Date fixe de rendez-vous / débrief</Label>
-                  <Input type="date" value={calDate} onChange={e => setCalDate(e.target.value)} className="bg-white" />
+                  <CustomDatePicker value={calDate} onChange={setCalDate} placeholder="Sélectionner une date" className="bg-white h-9 text-xs" />
                 </div>
               )}
             </div>
@@ -607,10 +629,10 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
                   </button>
                 )}
               </div>
-              <Input
-                type="date"
+              <CustomDatePicker
                 value={waitFollowUpDate}
-                onChange={e => setWaitFollowUpDate(e.target.value)}
+                onChange={setWaitFollowUpDate}
+                placeholder="Sélectionner une date de relance (optionnel)"
                 className="h-9 text-xs bg-white"
               />
               <div className="flex flex-wrap gap-1.5 pt-0.5">
@@ -636,28 +658,26 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
               </div>
             </div>
 
-            {/* Retranscrire dans le calendrier */}
-            <div className="pt-1">
-              <label className="flex items-start gap-2.5 p-2 rounded-lg bg-white hover:bg-amber-50/50 border border-slate-200 cursor-pointer transition-colors">
-                <input
-                  type="checkbox"
-                  checked={waitAddToCalendar}
-                  onChange={e => setWaitAddToCalendar(e.target.checked)}
-                  className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 mt-0.5 h-4 w-4 cursor-pointer"
-                />
-                <div className="text-xs">
-                  <p className="font-semibold text-slate-800 flex items-center gap-1.5">
-                    <CalendarPlus className="w-3.5 h-3.5 text-purple-600" />
-                    Retranscrire dans le calendrier
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {waitFollowUpDate
-                      ? `Crée une échéance au calendrier le ${waitFollowUpDate}`
-                      : "Crée un rappel au calendrier pour le suivi de ce retour"}
-                  </p>
-                </div>
-              </label>
-            </div>
+            {/* Retranscrire dans le calendrier avec choix fixe / flexible */}
+            <CalendarSyncOptions
+              enabled={waitAddToCalendar}
+              onEnabledChange={setWaitAddToCalendar}
+              isFlexible={waitCalIsFlexible}
+              onFlexibleChange={setWaitCalIsFlexible}
+              date={waitCalDate}
+              onDateChange={setWaitCalDate}
+              endDate={waitCalEndDate}
+              onEndDateChange={setWaitCalEndDate}
+              flexLabel={waitCalFlexLabel}
+              onFlexLabelChange={setWaitCalFlexLabel}
+              defaultSuggestedDate={waitFollowUpDate}
+              labelTitle="Retranscrire dans le calendrier"
+              labelDescription={
+                waitFollowUpDate
+                  ? `Planifier un rappel ou une période de relance dans votre agenda IT (suggéré le ${waitFollowUpDate})`
+                  : "Planifier un rappel ou une période de relance dans votre agenda IT"
+              }
+            />
 
             <div className="space-y-1">
               <Label className="text-xs font-semibold text-slate-800">Description / Contexte (optionnel)</Label>

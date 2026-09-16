@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { CustomDatePicker } from '@/components/ui/date-picker'
 import { Monitor, Server, Plus, Trash2, AlertTriangle } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { differenceInDays, isPast } from 'date-fns'
@@ -275,7 +276,7 @@ export default function ParcPage() {
             <div className="space-y-2"><Label>Utilisateur</Label><Input value={compUser} onChange={e => setCompUser(e.target.value)} /></div>
             <div className="space-y-2"><Label>Système d'exploitation (OS)</Label><Input value={compOS} onChange={e => setCompOS(e.target.value)} /></div>
             <div className="space-y-2"><Label>Antivirus</Label><Input value={compAV} onChange={e => setCompAV(e.target.value)} placeholder="ex: Sophos, Defender, Aucun..." /></div>
-            <div className="space-y-2"><Label>Date de fin de garantie</Label><Input type="date" value={compWarranty} onChange={e => setCompWarranty(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Date de fin de garantie</Label><CustomDatePicker value={compWarranty} onChange={setCompWarranty} placeholder="Sélectionner la date de fin de garantie" className="h-9 text-xs" /></div>
             <div className="space-y-2"><Label>Notes</Label><Textarea value={compNotes} onChange={e => setCompNotes(e.target.value)} /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setIsCompAddOpen(false)}>Annuler</Button><Button onClick={handleCompAdd}>Enregistrer</Button></DialogFooter>
@@ -291,7 +292,7 @@ export default function ParcPage() {
             <div className="space-y-2"><Label>Utilisateur</Label><Input value={compUser} onChange={e => setCompUser(e.target.value)} /></div>
             <div className="space-y-2"><Label>Système d'exploitation (OS)</Label><Input value={compOS} onChange={e => setCompOS(e.target.value)} /></div>
             <div className="space-y-2"><Label>Antivirus</Label><Input value={compAV} onChange={e => setCompAV(e.target.value)} /></div>
-            <div className="space-y-2"><Label>Date de fin de garantie</Label><Input type="date" value={compWarranty} onChange={e => setCompWarranty(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Date de fin de garantie</Label><CustomDatePicker value={compWarranty} onChange={setCompWarranty} placeholder="Sélectionner la date de fin de garantie" className="h-9 text-xs" /></div>
             <div className="space-y-2"><Label>Notes</Label><Textarea value={compNotes} onChange={e => setCompNotes(e.target.value)} /></div>
           </div>
           <DialogFooter className="flex justify-between sm:justify-between">

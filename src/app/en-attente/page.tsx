@@ -19,6 +19,9 @@ import {
 } from '@/lib/waiting-returns'
 import { checkTaskBlocked } from '@/lib/blockers'
 import { cn } from '@/lib/utils'
+import { CustomDatePicker } from '@/components/ui/date-picker'
+import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
+import { formatFlexibleEventDescription } from '@/lib/flexible-events'
 import { FollowUpReturnDialog } from '@/components/waiting/FollowUpReturnDialog'
 import { 
   Hourglass, 
@@ -64,6 +67,10 @@ function EnAttenteContent() {
   const [formFollowUpDate, setFormFollowUpDate] = useState('')
   const [formDescription, setFormDescription] = useState('')
   const [formAddToCalendar, setFormAddToCalendar] = useState(false)
+  const [formCalIsFlexible, setFormCalIsFlexible] = useState(false)
+  const [formCalDate, setFormCalDate] = useState('')
+  const [formCalEndDate, setFormCalEndDate] = useState('')
+  const [formCalFlexLabel, setFormCalFlexLabel] = useState('Dans les 2 prochaines semaines')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Modal de relance interactive
@@ -226,6 +233,10 @@ function EnAttenteContent() {
     setFormFollowUpDate('')
     setFormDescription('')
     setFormAddToCalendar(false)
+    setFormCalIsFlexible(false)
+    setFormCalDate('')
+    setFormCalEndDate('')
+    setFormCalFlexLabel('Dans les 2 prochaines semaines')
     setIsReturnModalOpen(true)
   }
 
@@ -238,6 +249,10 @@ function EnAttenteContent() {
     setFormFollowUpDate(item.follow_up_date || '')
     setFormDescription(item.description || '')
     setFormAddToCalendar(false)
+    setFormCalIsFlexible(false)
+    setFormCalDate(item.follow_up_date || '')
+    setFormCalEndDate('')
+    setFormCalFlexLabel('Dans les 2 prochaines semaines')
     setIsReturnModalOpen(true)
   }
 
@@ -255,12 +270,24 @@ function EnAttenteContent() {
           description: formDescription.trim() || null
         })
 
-        if (formAddToCalendar && formFollowUpDate) {
+        if (formAddToCalendar) {
+          const finalEventDate = formCalDate || formFollowUpDate || new Date().toISOString().split('T')[0]
+          let finalEndDate = formCalEndDate || null
+          if (formCalIsFlexible && !finalEndDate) {
+            const d = new Date(finalEventDate + 'T00:00:00')
+            d.setDate(d.getDate() + 14)
+            finalEndDate = d.toISOString().split('T')[0]
+          }
+          const baseDesc = `Retour attendu auprès de ${formWaitingOn.trim()}.${formDescription ? ' ' + formDescription.trim() : ''}`
+          const finalDesc = formCalIsFlexible
+            ? formatFlexibleEventDescription(baseDesc, formCalFlexLabel || 'Dans les 2 prochaines semaines')
+            : baseDesc
+
           await supabase.from('events').insert([{
             title: `Relance : ${formTitle.trim()} (${formWaitingOn.trim()})`,
-            description: `Retour attendu auprès de ${formWaitingOn.trim()}.${formDescription ? ' ' + formDescription.trim() : ''}`,
-            event_date: formFollowUpDate,
-            end_date: null,
+            description: finalDesc,
+            event_date: finalEventDate,
+            end_date: formCalIsFlexible ? finalEndDate : null,
             event_type: 'échéance',
             status: 'à venir',
             task_id: null,
@@ -280,12 +307,23 @@ function EnAttenteContent() {
         })
 
         if (created && formAddToCalendar) {
-          const eventDate = formFollowUpDate || new Date().toISOString().split('T')[0]
+          const finalEventDate = formCalDate || formFollowUpDate || new Date().toISOString().split('T')[0]
+          let finalEndDate = formCalEndDate || null
+          if (formCalIsFlexible && !finalEndDate) {
+            const d = new Date(finalEventDate + 'T00:00:00')
+            d.setDate(d.getDate() + 14)
+            finalEndDate = d.toISOString().split('T')[0]
+          }
+          const baseDesc = `Retour attendu auprès de ${formWaitingOn.trim()}.${formDescription ? ' ' + formDescription.trim() : ''}`
+          const finalDesc = formCalIsFlexible
+            ? formatFlexibleEventDescription(baseDesc, formCalFlexLabel || 'Dans les 2 prochaines semaines')
+            : baseDesc
+
           await supabase.from('events').insert([{
             title: `Retour attendu : ${formTitle.trim()} (${formWaitingOn.trim()})`,
-            description: `Retour attendu auprès de ${formWaitingOn.trim()}.${formDescription ? ' ' + formDescription.trim() : ''}`,
-            event_date: eventDate,
-            end_date: null,
+            description: finalDesc,
+            event_date: finalEventDate,
+            end_date: formCalIsFlexible ? finalEndDate : null,
             event_type: 'échéance',
             status: 'à venir',
             task_id: null,
@@ -344,8 +382,21 @@ function EnAttenteContent() {
   }
 
   // Confirmer la relance et son prochain délai
-  const handleConfirmFollowUp = async (newFollowUpDate: string | null, addToCalendar: boolean) => {
+  const handleConfirmFollowUp = async (
+    newFollowUpDate: string | null,
+    calendarOptions: {
+      addToCalendar: boolean
+      isFlexible?: boolean
+      calDate?: string
+      calEndDate?: string
+      calFlexLabel?: string
+    } | boolean
+  ) => {
     if (!followUpModalItem) return
+
+    const opts = typeof calendarOptions === 'boolean'
+      ? { addToCalendar: calendarOptions }
+      : calendarOptions
 
     const newCount = (followUpModalItem.follow_up_count || 0) + 1
 
@@ -354,12 +405,24 @@ function EnAttenteContent() {
       follow_up_count: newCount
     })
 
-    if (addToCalendar && newFollowUpDate) {
+    if (opts.addToCalendar) {
+      const finalEventDate = opts.calDate || newFollowUpDate || new Date().toISOString().split('T')[0]
+      let finalEndDate = opts.calEndDate || null
+      if (opts.isFlexible && !finalEndDate) {
+        const d = new Date(finalEventDate + 'T00:00:00')
+        d.setDate(d.getDate() + 14)
+        finalEndDate = d.toISOString().split('T')[0]
+      }
+      const baseDesc = `Relance effectuée auprès de ${followUpModalItem.waiting_on}. Objet: ${followUpModalItem.title}.`
+      const finalDesc = opts.isFlexible
+        ? formatFlexibleEventDescription(baseDesc, opts.calFlexLabel || 'Dans les 2 prochaines semaines')
+        : baseDesc
+
       await supabase.from('events').insert([{
         title: `Relance n°${newCount} : ${followUpModalItem.title} (${followUpModalItem.waiting_on})`,
-        description: `Relance effectuée auprès de ${followUpModalItem.waiting_on}. Objet: ${followUpModalItem.title}.`,
-        event_date: newFollowUpDate,
-        end_date: null,
+        description: finalDesc,
+        event_date: finalEventDate,
+        end_date: opts.isFlexible ? finalEndDate : null,
         event_type: 'échéance',
         status: 'à venir',
         task_id: null,
@@ -371,7 +434,7 @@ function EnAttenteContent() {
     setWaitingReturns(reloaded)
 
     if (newFollowUpDate) {
-      showNotification(`✓ Relance n°${newCount} consignée pour « ${followUpModalItem.title} » ! Prochaine relance le ${newFollowUpDate}${addToCalendar ? ' (inscrite au calendrier)' : ''}.`)
+      showNotification(`✓ Relance n°${newCount} consignée pour « ${followUpModalItem.title} » ! Prochaine relance le ${newFollowUpDate}${opts.addToCalendar ? ' (inscrite au calendrier)' : ''}.`)
     } else {
       showNotification(`✓ Relance n°${newCount} consignée pour « ${followUpModalItem.title} ». Aucune prochaine relance programmée.`)
     }
@@ -946,10 +1009,10 @@ function EnAttenteContent() {
                 </button>
               )}
             </div>
-            <Input
-              type="date"
+            <CustomDatePicker
               value={formFollowUpDate}
-              onChange={e => setFormFollowUpDate(e.target.value)}
+              onChange={setFormFollowUpDate}
+              placeholder="Sélectionner une date de relance (optionnel)"
               className="h-9 text-xs"
             />
             <div className="flex flex-wrap gap-1.5 pt-0.5">
@@ -975,28 +1038,26 @@ function EnAttenteContent() {
             </div>
           </div>
 
-          {/* Option calendrier */}
-          <div className="pt-1">
-            <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 cursor-pointer transition-colors">
-              <input
-                type="checkbox"
-                checked={formAddToCalendar}
-                onChange={e => setFormAddToCalendar(e.target.checked)}
-                className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 mt-0.5 h-4 w-4 cursor-pointer"
-              />
-              <div className="text-xs">
-                <p className="font-semibold text-slate-800 flex items-center gap-1.5">
-                  <CalendarPlus className="w-3.5 h-3.5 text-purple-600" />
-                  Retranscrire dans le calendrier
-                </p>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  {formFollowUpDate 
-                    ? `Crée une échéance au calendrier le ${formFollowUpDate}`
-                    : "Crée un rappel au calendrier pour le suivi de ce dossier"}
-                </p>
-              </div>
-            </label>
-          </div>
+          {/* Option calendrier avec choix fixe / flexible */}
+          <CalendarSyncOptions
+            enabled={formAddToCalendar}
+            onEnabledChange={setFormAddToCalendar}
+            isFlexible={formCalIsFlexible}
+            onFlexibleChange={setFormCalIsFlexible}
+            date={formCalDate}
+            onDateChange={setFormCalDate}
+            endDate={formCalEndDate}
+            onEndDateChange={setFormCalEndDate}
+            flexLabel={formCalFlexLabel}
+            onFlexLabelChange={setFormCalFlexLabel}
+            defaultSuggestedDate={formFollowUpDate}
+            labelTitle="Retranscrire dans le calendrier"
+            labelDescription={
+              formFollowUpDate
+                ? `Planifier un rappel ou une période de relance dans votre agenda IT (suggéré le ${formFollowUpDate})`
+                : "Planifier un rappel ou une période de relance dans votre agenda IT"
+            }
+          />
 
           <div className="space-y-1">
             <Label className="text-xs font-semibold text-slate-800">Description / Références (optionnel)</Label>

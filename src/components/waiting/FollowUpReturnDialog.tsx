@@ -15,6 +15,16 @@ import {
   User
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { CustomDatePicker } from '@/components/ui/date-picker'
+import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
+
+export interface FollowUpCalendarOptions {
+  addToCalendar: boolean
+  isFlexible?: boolean
+  calDate?: string
+  calEndDate?: string
+  calFlexLabel?: string
+}
 
 interface FollowUpReturnDialogProps {
   open: boolean
@@ -22,7 +32,7 @@ interface FollowUpReturnDialogProps {
   onClose: () => void
   onConfirm: (
     newFollowUpDate: string | null,
-    addToCalendar: boolean
+    calendarOptions: FollowUpCalendarOptions | boolean
   ) => Promise<void>
 }
 
@@ -37,6 +47,10 @@ export function FollowUpReturnDialog({
   const [selectedDays, setSelectedDays] = useState<number>(3)
   const [customDate, setCustomDate] = useState<string>('')
   const [addToCalendar, setAddToCalendar] = useState<boolean>(true)
+  const [calIsFlexible, setCalIsFlexible] = useState<boolean>(false)
+  const [calDate, setCalDate] = useState<string>('')
+  const [calEndDate, setCalEndDate] = useState<string>('')
+  const [calFlexLabel, setCalFlexLabel] = useState<string>('Dans les 2 prochaines semaines')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Initialisation à l'ouverture
@@ -46,6 +60,12 @@ export function FollowUpReturnDialog({
       setSelectedDays(3)
       setCustomDate('')
       setAddToCalendar(true)
+      setCalIsFlexible(false)
+      const d = new Date()
+      d.setDate(d.getDate() + 3)
+      setCalDate(d.toISOString().split('T')[0])
+      setCalEndDate('')
+      setCalFlexLabel('Dans les 2 prochaines semaines')
     }
   }, [open])
 
@@ -60,6 +80,7 @@ export function FollowUpReturnDialog({
   const handlePresetSelect = (days: number) => {
     setSelectedMode('preset')
     setSelectedDays(days)
+    setCalDate(calculateDateFromDays(days))
   }
 
   const handleConfirm = async () => {
@@ -74,7 +95,13 @@ export function FollowUpReturnDialog({
         nextDate = null
       }
 
-      await onConfirm(nextDate, selectedMode !== 'none' && addToCalendar)
+      await onConfirm(nextDate, {
+        addToCalendar: selectedMode !== 'none' && addToCalendar,
+        isFlexible: calIsFlexible,
+        calDate: calDate || nextDate || calculateDateFromDays(3),
+        calEndDate,
+        calFlexLabel
+      })
       onClose()
     } finally {
       setIsSubmitting(false)
@@ -169,11 +196,13 @@ export function FollowUpReturnDialog({
 
             {selectedMode === 'custom' && (
               <div className="mt-2 pl-2 animate-in fade-in">
-                <Input
-                  type="date"
+                <CustomDatePicker
                   value={customDate}
-                  onChange={e => setCustomDate(e.target.value)}
-                  min={new Date().toISOString().split('T')[0]}
+                  onChange={(d) => {
+                    setCustomDate(d)
+                    setCalDate(d)
+                  }}
+                  placeholder="Sélectionner la date de relance"
                   className="h-9 text-xs"
                 />
               </div>
@@ -204,23 +233,21 @@ export function FollowUpReturnDialog({
         {/* Option Calendrier si une date de relance est prévue */}
         {selectedMode !== 'none' && (
           <div className="pt-2 border-t border-slate-100">
-            <label className="flex items-start gap-2.5 p-2 rounded-lg bg-slate-50 hover:bg-slate-100/70 border border-slate-200 cursor-pointer transition-colors">
-              <input
-                type="checkbox"
-                checked={addToCalendar}
-                onChange={e => setAddToCalendar(e.target.checked)}
-                className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 mt-0.5 h-4 w-4 cursor-pointer"
-              />
-              <div className="text-xs">
-                <p className="font-semibold text-slate-800 flex items-center gap-1.5">
-                  <CalendarPlus className="w-3.5 h-3.5 text-purple-600" />
-                  Inscrire cette relance dans le calendrier
-                </p>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  Un événement d&apos;échéance sera ajouté pour vous rappeler de relancer le jour J.
-                </p>
-              </div>
-            </label>
+            <CalendarSyncOptions
+              enabled={addToCalendar}
+              onEnabledChange={setAddToCalendar}
+              isFlexible={calIsFlexible}
+              onFlexibleChange={setCalIsFlexible}
+              date={calDate}
+              onDateChange={setCalDate}
+              endDate={calEndDate}
+              onEndDateChange={setCalEndDate}
+              flexLabel={calFlexLabel}
+              onFlexLabelChange={setCalFlexLabel}
+              defaultSuggestedDate={selectedMode === 'custom' ? customDate : calDate}
+              labelTitle="Inscrire cette relance dans le calendrier"
+              labelDescription="Crée un rappel au jour J ou sur une période flexible dans votre agenda"
+            />
           </div>
         )}
       </div>

@@ -21,6 +21,8 @@ import {
   CalendarPlus
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { CustomDatePicker } from '@/components/ui/date-picker'
+import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
 
 interface TaskSelectReturnDialogProps {
   open: boolean
@@ -35,6 +37,10 @@ interface TaskSelectReturnDialogProps {
     target_type?: string
     follow_up_date?: string
     addToCalendar?: boolean
+    calIsFlexible?: boolean
+    calDate?: string
+    calEndDate?: string
+    calFlexLabel?: string
   }) => Promise<void>
 }
 
@@ -57,6 +63,10 @@ export function TaskSelectReturnDialog({
   const [newTargetType, setNewTargetType] = useState('Prestataire')
   const [newFollowUpDate, setNewFollowUpDate] = useState('')
   const [newAddToCalendar, setNewAddToCalendar] = useState(false)
+  const [newCalIsFlexible, setNewCalIsFlexible] = useState(false)
+  const [newCalDate, setNewCalDate] = useState('')
+  const [newCalEndDate, setNewCalEndDate] = useState('')
+  const [newCalFlexLabel, setNewCalFlexLabel] = useState('Dans les 2 prochaines semaines')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   React.useEffect(() => {
@@ -68,6 +78,10 @@ export function TaskSelectReturnDialog({
       setNewWaitingOn('')
       setNewFollowUpDate('')
       setNewAddToCalendar(false)
+      setNewCalIsFlexible(false)
+      setNewCalDate('')
+      setNewCalEndDate('')
+      setNewCalFlexLabel('Dans les 2 prochaines semaines')
     }
   }, [open, currentSelectedReturnId])
 
@@ -105,7 +119,11 @@ export function TaskSelectReturnDialog({
         waiting_on: newWaitingOn.trim(),
         target_type: newTargetType,
         follow_up_date: newFollowUpDate || undefined,
-        addToCalendar: newAddToCalendar
+        addToCalendar: newAddToCalendar,
+        calIsFlexible: newCalIsFlexible,
+        calDate: newCalDate,
+        calEndDate: newCalEndDate,
+        calFlexLabel: newCalFlexLabel
       })
       onClose()
     } finally {
@@ -309,10 +327,10 @@ export function TaskSelectReturnDialog({
                   </button>
                 )}
               </div>
-              <Input
-                type="date"
+              <CustomDatePicker
                 value={newFollowUpDate}
-                onChange={e => setNewFollowUpDate(e.target.value)}
+                onChange={setNewFollowUpDate}
+                placeholder="Sélectionner une date de relance (optionnel)"
                 className="h-9 text-xs bg-white"
               />
               <div className="flex flex-wrap gap-1.5 pt-0.5">
@@ -340,28 +358,26 @@ export function TaskSelectReturnDialog({
               </div>
             </div>
 
-            {/* Case à cocher calendrier */}
-            <div className="pt-1">
-              <label className="flex items-start gap-2.5 p-2 rounded-lg bg-white hover:bg-amber-50/50 border border-slate-200 cursor-pointer transition-colors">
-                <input
-                  type="checkbox"
-                  checked={newAddToCalendar}
-                  onChange={e => setNewAddToCalendar(e.target.checked)}
-                  className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 mt-0.5 h-4 w-4 cursor-pointer"
-                />
-                <div className="text-xs">
-                  <p className="font-semibold text-slate-800 flex items-center gap-1.5">
-                    <CalendarPlus className="w-3.5 h-3.5 text-purple-600" />
-                    Retranscrire dans le calendrier
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {newFollowUpDate 
-                      ? `Crée un rappel / échéance au calendrier le ${newFollowUpDate}`
-                      : "Crée un rappel au calendrier pour le suivi de ce retour"}
-                  </p>
-                </div>
-              </label>
-            </div>
+            {/* Case à cocher calendrier avec choix fixe / flexible */}
+            <CalendarSyncOptions
+              enabled={newAddToCalendar}
+              onEnabledChange={setNewAddToCalendar}
+              isFlexible={newCalIsFlexible}
+              onFlexibleChange={setNewCalIsFlexible}
+              date={newCalDate}
+              onDateChange={setNewCalDate}
+              endDate={newCalEndDate}
+              onEndDateChange={setNewCalEndDate}
+              flexLabel={newCalFlexLabel}
+              onFlexLabelChange={setNewCalFlexLabel}
+              defaultSuggestedDate={newFollowUpDate}
+              labelTitle="Retranscrire dans le calendrier"
+              labelDescription={
+                newFollowUpDate
+                  ? `Planifier un rappel ou une période de relance dans votre agenda IT (suggéré le ${newFollowUpDate})`
+                  : "Planifier un rappel ou une période de relance dans votre agenda IT"
+              }
+            />
 
             <p className="text-[11px] text-slate-500 italic pt-1">
               ℹ️ Ce retour sera automatiquement ajouté à votre rubrique « En attente » et rattaché à cette tâche.

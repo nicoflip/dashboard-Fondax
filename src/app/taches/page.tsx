@@ -29,6 +29,7 @@ import {
   removeWaitingTag, 
   getTaskWaitingDetails 
 } from '@/lib/waiting'
+import { formatFlexibleEventDescription } from '@/lib/flexible-events'
 import { Plus, CheckCircle2, Flame, Hourglass } from 'lucide-react'
 
 function TasksContent() {
@@ -184,6 +185,10 @@ function TasksContent() {
     target_type?: string
     follow_up_date?: string
     addToCalendar?: boolean
+    calIsFlexible?: boolean
+    calDate?: string
+    calEndDate?: string
+    calFlexLabel?: string
   }) => {
     if (!taskForReturnSelect) return
     const newReturn = await createWaitingReturn(supabase, {
@@ -214,14 +219,25 @@ function TasksContent() {
         } : t))
 
         if (data.addToCalendar) {
-          const eventDate = data.follow_up_date || new Date().toISOString().split('T')[0]
+          const finalEventDate = data.calDate || data.follow_up_date || new Date().toISOString().split('T')[0]
+          let finalEndDate = data.calEndDate || null
+          if (data.calIsFlexible && !finalEndDate) {
+            const d = new Date(finalEventDate + 'T00:00:00')
+            d.setDate(d.getDate() + 14)
+            finalEndDate = d.toISOString().split('T')[0]
+          }
+          const baseDesc = `Retour attendu lié à la tâche « ${taskForReturnSelect.title} ».`
+          const finalDesc = data.calIsFlexible
+            ? formatFlexibleEventDescription(baseDesc, data.calFlexLabel || 'Dans les 2 prochaines semaines')
+            : baseDesc
+
           const { data: newEv } = await supabase
             .from('events')
             .insert([{
               title: `Retour attendu : ${data.title.trim()} (${data.waiting_on.trim()})`,
-              description: `Retour attendu lié à la tâche « ${taskForReturnSelect.title} ».`,
-              event_date: eventDate,
-              end_date: null,
+              description: finalDesc,
+              event_date: finalEventDate,
+              end_date: data.calIsFlexible ? finalEndDate : null,
               event_type: 'échéance',
               status: 'à venir',
               task_id: taskForReturnSelect.id,
@@ -330,13 +346,24 @@ function TasksContent() {
         if (formData.createAlsoEvent) {
           const eventDate = formData.eventDate || new Date().toISOString().split('T')[0]
           const eventType = formData.eventType || 'échéance'
+          let finalEndDate = formData.eventEndDate || null
+          if (formData.eventIsFlexible && !finalEndDate) {
+            const d = new Date(eventDate + 'T00:00:00')
+            d.setDate(d.getDate() + 14)
+            finalEndDate = d.toISOString().split('T')[0]
+          }
+          const baseDesc = formData.description.trim() || ''
+          const finalDesc = formData.eventIsFlexible
+            ? formatFlexibleEventDescription(baseDesc, formData.eventFlexLabel || 'Dans les 2 prochaines semaines')
+            : (baseDesc || null)
+
           const { data: newEvent, error: evError } = await supabase
             .from('events')
             .insert([{
               title: formData.title.trim(),
-              description: formData.description.trim() || null,
+              description: finalDesc,
               event_date: eventDate,
-              end_date: null,
+              end_date: formData.eventIsFlexible ? finalEndDate : null,
               event_type: eventType,
               status: 'à venir',
               task_id: data.id,
@@ -347,7 +374,11 @@ function TasksContent() {
 
           if (!evError && newEvent) {
             setEvents(prev => [...prev, newEvent as CalendarEvent])
-            showNotification(`Tâche et événement éponyme créés avec succès !`)
+            showNotification(
+              formData.eventIsFlexible
+                ? `Tâche et événement éponyme en période flexible créés avec succès !`
+                : `Tâche et événement éponyme créés avec succès !`
+            )
           } else {
             showNotification(`Tâche créée avec succès !`)
           }

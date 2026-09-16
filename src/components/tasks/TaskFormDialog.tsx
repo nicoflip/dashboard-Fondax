@@ -17,6 +17,8 @@ import { parseTaskBlocker } from '@/lib/blockers'
 import { extractWaitingReturnId, formatTaskWithWaitingReturn } from '@/lib/waiting-returns'
 import { TaskBlockerSelector } from './TaskBlockerSelector'
 import { CustomDatePicker } from '@/components/ui/date-picker'
+import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
+import { WaitingReturnSelector } from '@/components/ui/WaitingReturnSelector'
 import { Badge } from '@/components/ui/badge'
 import { Hourglass, Calendar as CalendarIcon, User, Plus, Clock } from 'lucide-react'
 
@@ -30,6 +32,9 @@ export interface TaskFormData {
   waitingReturnId?: string | null
   createAlsoEvent?: boolean
   eventDate?: string
+  eventEndDate?: string
+  eventIsFlexible?: boolean
+  eventFlexLabel?: string
   eventType?: EventType
 }
 
@@ -61,6 +66,9 @@ const DEFAULT_FORM_DATA: TaskFormData = {
   waitingReturnId: null,
   createAlsoEvent: false,
   eventDate: new Date().toISOString().split('T')[0],
+  eventEndDate: '',
+  eventIsFlexible: false,
+  eventFlexLabel: 'Dans les 2 prochaines semaines',
   eventType: 'échéance'
 }
 
@@ -106,6 +114,9 @@ export function TaskFormDialog({
           waitingReturnId: returnId,
           createAlsoEvent: false,
           eventDate: new Date().toISOString().split('T')[0],
+          eventEndDate: '',
+          eventIsFlexible: false,
+          eventFlexLabel: 'Dans les 2 prochaines semaines',
           eventType: 'échéance'
         })
       } else {
@@ -198,66 +209,31 @@ export function TaskFormDialog({
         {/* Choix du retour attendu si la tâche est en attente */}
         {formData.status === 'en attente de retour externe' && (
           <div className="rounded-xl border border-amber-300 bg-amber-50/60 p-3.5 space-y-3 shadow-2xs animate-in fade-in">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
-                <Hourglass className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Quel retour cette tâche attend-elle ?</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsCreatingReturnInline(v => !v)}
-                className="text-[11px] font-semibold text-amber-800 hover:text-amber-950 flex items-center gap-1 cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
-                {isCreatingReturnInline ? "Choisir existant" : "Nouveau retour"}
-              </button>
-            </div>
-
             {!isCreatingReturnInline ? (
-              <div className="space-y-2">
-                <select
-                  value={formData.waitingReturnId || ''}
-                  onChange={e => setFormData({ ...formData, waitingReturnId: e.target.value || null })}
-                  className="flex h-10 w-full rounded-md border border-amber-300 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
-                >
-                  <option value="">-- Sélectionner un retour que vous attendez --</option>
-                  {waitingReturns.map(r => (
-                    <option key={r.id} value={r.id}>
-                      {r.title} ({r.waiting_on}) {r.status === 'reçu' ? '✓ Reçu' : ''}
-                    </option>
-                  ))}
-                </select>
-
-                {formData.waitingReturnId && (
-                  (() => {
-                    const found = waitingReturns.find(r => r.id === formData.waitingReturnId)
-                    if (!found) return null
-                    return (
-                      <div className="p-2 bg-white rounded-lg border border-amber-200 text-xs flex items-center justify-between">
-                        <div>
-                          <p className="font-bold text-slate-900">{found.title}</p>
-                          <p className="text-[11px] text-slate-500">Tiers : <strong>{found.waiting_on}</strong> ({found.target_type || 'Prestataire'})</p>
-                        </div>
-                        {found.follow_up_date && (
-                          <span className="text-[11px] text-amber-900 bg-amber-100 px-2 py-0.5 rounded font-medium">
-                            Relance : {found.follow_up_date}
-                          </span>
-                        )}
-                      </div>
-                    )
-                  })()
-                )}
-
-                {waitingReturns.length === 0 && (
-                  <p className="text-[11px] text-slate-500 italic">
-                    Aucun retour n'a encore été créé. Cliquez sur "+ Nouveau retour" pour définir ce que vous attendez.
-                  </p>
-                )}
-              </div>
+              <WaitingReturnSelector
+                waitingReturns={waitingReturns}
+                value={formData.waitingReturnId || null}
+                onChange={id => setFormData({ ...formData, waitingReturnId: id })}
+                label="Quel retour cette tâche attend-elle ?"
+                placeholder="Rechercher et associer un retour attendu..."
+                onCreateNew={() => setIsCreatingReturnInline(true)}
+              />
             ) : (
               /* Inline form to create new return */
               <div className="space-y-2 bg-white p-3 rounded-lg border border-amber-200">
-                <p className="text-[11px] font-bold text-amber-900">Nouveau retour attendu :</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
+                    <Hourglass className="w-3.5 h-3.5 text-amber-600" />
+                    Créer un nouveau retour attendu :
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingReturnInline(false)}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 font-medium cursor-pointer"
+                  >
+                    Annuler / Choisir existant
+                  </button>
+                </div>
                 <Input
                   placeholder="Objet du retour (ex: Devis fibre Orange, Validation devis...)"
                   value={inlineReturnTitle}
@@ -284,7 +260,7 @@ export function TaskFormDialog({
                     }
                   }}
                   disabled={!inlineReturnTitle.trim() || !inlineReturnWho.trim()}
-                  className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                  className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
                 >
                   Créer et associer à cette tâche
                 </Button>
@@ -294,63 +270,25 @@ export function TaskFormDialog({
         )}
 
         {/* Option : Créer l'événement éponyme au calendrier */}
+        {/* Option : Créer l'événement éponyme au calendrier avec choix fixe / flexible */}
         {!editingTask && (
-          <div className={cn(
-            "rounded-xl border p-3.5 transition-all",
-            formData.createAlsoEvent ? "bg-purple-50/60 border-purple-200 shadow-2xs" : "bg-slate-50/60 border-slate-200"
-          )}>
-            <label className="flex items-start gap-3 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={formData.createAlsoEvent || false}
-                onChange={e => setFormData({ 
-                  ...formData, 
-                  createAlsoEvent: e.target.checked,
-                  eventDate: formData.eventDate || new Date().toISOString().split('T')[0],
-                  eventType: formData.eventType || 'échéance'
-                })}
-                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-              />
-              <div className="space-y-0.5 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-800">
-                    Créer également l'événement éponyme dans le calendrier
-                  </span>
-                  <Badge variant="outline" className="text-[10px] bg-white text-purple-700 border-purple-200 py-0">
-                    Synchro Calendrier
-                  </Badge>
-                </div>
-                <p className="text-[11px] text-slate-500 leading-tight">
-                  Un événement &laquo;&nbsp;{formData.title.trim() || "même titre"}&nbsp;&raquo; sera automatiquement créé au calendrier et rattaché à cette tâche.
-                </p>
-              </div>
-            </label>
-
-            {formData.createAlsoEvent && (
-              <div className="mt-3 pt-3 border-t border-purple-100 grid grid-cols-1 sm:grid-cols-2 gap-3 pl-7">
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-semibold text-slate-700">Date de l'événement</Label>
-                  <CustomDatePicker
-                    value={formData.eventDate || new Date().toISOString().split('T')[0]}
-                    onChange={d => setFormData({ ...formData, eventDate: d })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-[11px] font-semibold text-slate-700">Type d'événement</Label>
-                  <select
-                    value={formData.eventType || 'échéance'}
-                    onChange={e => setFormData({ ...formData, eventType: e.target.value as EventType })}
-                    className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-purple-600"
-                  >
-                    <option value="échéance">Échéance</option>
-                    <option value="rdv">Rendez-vous</option>
-                    <option value="appel">Appel</option>
-                    <option value="étape chantier">Étape chantier</option>
-                  </select>
-                </div>
-              </div>
-            )}
-          </div>
+          <CalendarSyncOptions
+            enabled={formData.createAlsoEvent || false}
+            onEnabledChange={val => setFormData({ ...formData, createAlsoEvent: val })}
+            isFlexible={formData.eventIsFlexible || false}
+            onFlexibleChange={val => setFormData({ ...formData, eventIsFlexible: val })}
+            date={formData.eventDate || new Date().toISOString().split('T')[0]}
+            onDateChange={d => setFormData({ ...formData, eventDate: d })}
+            endDate={formData.eventEndDate || ''}
+            onEndDateChange={d => setFormData({ ...formData, eventEndDate: d })}
+            flexLabel={formData.eventFlexLabel || 'Dans les 2 prochaines semaines'}
+            onFlexLabelChange={l => setFormData({ ...formData, eventFlexLabel: l })}
+            showEventType={true}
+            eventType={formData.eventType || 'échéance'}
+            onEventTypeChange={t => setFormData({ ...formData, eventType: t })}
+            labelTitle="Créer également l'événement éponyme dans le calendrier"
+            labelDescription={`Un événement « ${formData.title.trim() || 'même titre'} » sera créé au calendrier et rattaché à cette tâche.`}
+          />
         )}
 
         {/* Dépendance conditionnelle */}
