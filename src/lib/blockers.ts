@@ -1,4 +1,4 @@
-import { Task, CalendarEvent, TaskStatus, TaskBlockerInfo, BlockerConfig, TaskBlockedStatus } from './types'
+import { Task, CalendarEvent, TaskStatus, TaskBlockerInfo, BlockerConfig, TaskBlockedStatus, WaitingReturn } from './types'
 
 /**
  * Extrait les métadonnées de dépendance/blocage d'une tâche à partir de sa description textuelle.
@@ -22,14 +22,26 @@ export function parseTaskBlocker(desc?: string | null): TaskBlockerInfo {
     }
   }
 
-  // 1b. Bloqueur par retour tiers en attente : [depends_on:waiting:<taskId>]
-  const waitingMatch = cleanedForBlocker.match(/^\[depends_on:waiting:([^\]]+)\]\s*\n?([\s\S]*)$/i)
-  if (waitingMatch) {
+  // 1b. Bloqueur par retour attendu : [depends_on:waiting:<returnId>] ou [waiting_return:<returnId>]
+  const waitingBlockerMatch = cleanedForBlocker.match(/^\[depends_on:waiting:([^\]]+)\]\s*\n?([\s\S]*)$/i)
+  if (waitingBlockerMatch) {
     return {
       type: 'waiting',
-      prereqTaskId: waitingMatch[1].trim(),
+      prereqReturnId: waitingBlockerMatch[1].trim(),
+      prereqTaskId: waitingBlockerMatch[1].trim(),
       requiredStatus: 'fait',
-      cleanDescription: waitingMatch[2].trim()
+      cleanDescription: waitingBlockerMatch[2].trim()
+    }
+  }
+
+  const waitingReturnMatch = cleanedForBlocker.match(/^\[waiting_return:([^\]]+)\]\s*\n?([\s\S]*)$/i)
+  if (waitingReturnMatch) {
+    return {
+      type: 'waiting',
+      prereqReturnId: waitingReturnMatch[1].trim(),
+      prereqTaskId: waitingReturnMatch[1].trim(),
+      requiredStatus: 'fait',
+      cleanDescription: waitingReturnMatch[2].trim()
     }
   }
 
@@ -77,8 +89,9 @@ export function formatTaskDescriptionWithBlocker(
   blocker: BlockerConfig
 ): string {
   const base = (cleanDesc || '').trim()
-  if (blocker.type === 'waiting' && blocker.prereqTaskId) {
-    return `[depends_on:waiting:${blocker.prereqTaskId}]\n${base}`.trim()
+  const returnId = blocker.prereqReturnId || blocker.prereqTaskId
+  if (blocker.type === 'waiting' && returnId) {
+    return `[depends_on:waiting:${returnId}]\n${base}`.trim()
   }
   if (blocker.type === 'task' && blocker.prereqTaskId) {
     const st = blocker.requiredStatus || 'fait'
@@ -99,19 +112,33 @@ export function formatTaskDescriptionWithBlocker(
 export function checkTaskBlocked(
   t: Task,
   allTasks: Task[],
-  allEvents: CalendarEvent[] = []
+  allEvents: CalendarEvent[] = [],
+  allWaitingReturns: WaitingReturn[] = []
 ): TaskBlockedStatus {
   const blocker = parseTaskBlocker(t.description)
   if (blocker.type === 'none') {
     return { isBlocked: false, blocker }
   }
 
-  if (blocker.type === 'waiting' && blocker.prereqTaskId) {
-    const prereq = allTasks.find(item => item.id === blocker.prereqTaskId)
-    if (!prereq) return { isBlocked: false, blocker }
-    // Bloqué tant que le dossier est en attente de retour externe
-    const isBlocked = prereq.status === 'en attente de retour externe'
-    return { isBlocked, blocker, prereqTask: prereq }
+  if (blocker.type === 'waiting') {
+    const returnId = blocker.prereqReturnId || blocker.prereqTaskId
+    if (!returnId) return { isBlocked: false, blocker }
+
+    // 1. Chercher parmi les retours attendus (Section « En attente »)
+    const prereqReturn = allWaitingReturns.find(r => r.id === returnId)
+    if (prereqReturn) {
+      const isBlocked = prereqReturn.status === 'en attente'
+      return { isBlocked, blocker, prereqReturn }
+    }
+
+    // 2. Fallback rétrocompatible si une tâche avait été liée
+    const prereqTask = allTasks.find(item => item.id === returnId)
+    if (prereqTask) {
+      const isBlocked = prereqTask.status === 'en attente de retour externe'
+      return { isBlocked, blocker, prereqTask }
+    }
+
+    return { isBlocked: false, blocker }
   }
 
   if (blocker.type === 'task' && blocker.prereqTaskId) {
@@ -148,7 +175,8 @@ export function checkTaskBlocked(
  */
 export function sortTasksWithBlockers(
   tasks: Task[],
-  allEvents: CalendarEvent[] = []
+  allEvents: CalendarEvent[] = [],
+  allWaitingReturns: WaitingReturn[] = []
 ): Task[] {
   const prioOrder: Record<string, number> = { haute: 1, moyenne: 2, basse: 3 }
 
@@ -161,8 +189,8 @@ export function sortTasksWithBlockers(
 
     // 2. Pour les tâches actives, les non-bloquées passent avant les bloquées
     if (!isDoneA && !isDoneB) {
-      const blockedA = checkTaskBlocked(a, tasks, allEvents).isBlocked
-      const blockedB = checkTaskBlocked(b, tasks, allEvents).isBlocked
+      const blockedA = checkTaskBlocked(a, tasks, allEvents, allWaitingReturns).isBlocked
+      const blockedB = checkTaskBlocked(b, tasks, allEvents, allWaitingReturns).isBlocked
       if (blockedA && !blockedB) return 1
       if (!blockedA && blockedB) return -1
     }

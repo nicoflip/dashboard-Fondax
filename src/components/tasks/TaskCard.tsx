@@ -13,8 +13,9 @@ import {
   TASK_CATEGORY_COLORS, 
   formatDate 
 } from '@/lib/utils'
-import { Task, CalendarEvent, TaskStatus } from '@/lib/types'
+import { Task, CalendarEvent, TaskStatus, WaitingReturn } from '@/lib/types'
 import { checkTaskBlocked } from '@/lib/blockers'
+import { extractWaitingReturnId, getWaitingReturnMetrics } from '@/lib/waiting-returns'
 import { getTaskWaitingDetails } from '@/lib/waiting'
 import { 
   Trash2, 
@@ -26,13 +27,15 @@ import {
   Calendar, 
   Check, 
   Lock, 
-  Unlock 
+  Unlock,
+  User
 } from 'lucide-react'
 
 interface TaskCardProps {
   task: Task
   allTasks: Task[]
   allEvents: CalendarEvent[]
+  waitingReturns?: WaitingReturn[]
   onEdit: (task: Task) => void
   onDelete: (taskId: string) => void
   onSchedule: (task: Task) => void
@@ -44,6 +47,7 @@ export function TaskCard({
   task,
   allTasks,
   allEvents,
+  waitingReturns = [],
   onEdit,
   onDelete,
   onSchedule,
@@ -56,14 +60,23 @@ export function TaskCard({
   const isHighPrio = task.priority === 'haute'
   const isUrgent = isHighPrio && !isFait
 
-  // Métriques de gestion d'attente & relances
-  const { info: waitingInfo, metrics: waitingMetrics } = getTaskWaitingDetails(task)
+  // Trouver le retour attendu associé à cette tâche (s'il existe)
+  const waitingReturnId = extractWaitingReturnId(task.description)
+  const associatedReturn = waitingReturns.find(r => r.id === waitingReturnId) || null
+  const returnMetrics = associatedReturn ? getWaitingReturnMetrics(associatedReturn) : null
+
+  // Métriques de secours
+  const { info: waitingInfo, metrics: fallbackWaitingMetrics } = getTaskWaitingDetails(task)
+
+  const activeMetrics = returnMetrics || fallbackWaitingMetrics
+  const waitingMetrics = activeMetrics
 
   // Évaluation des conditions de blocage
-  const { isBlocked, blocker, prereqTask, prereqEvent, unlockDate } = checkTaskBlocked(
+  const { isBlocked, blocker, prereqTask, prereqEvent, prereqReturn, unlockDate } = checkTaskBlocked(
     task,
     allTasks,
-    allEvents
+    allEvents,
+    waitingReturns
   )
 
   // Styling visuel selon état et blocage
@@ -72,9 +85,9 @@ export function TaskCard({
     : isUrgent 
     ? 'border-l-[6px] border-l-red-600 border-red-300 ring-2 ring-red-400/40 shadow-md shadow-red-100/70' 
     : isAttente 
-    ? (waitingMetrics.isDragging 
+    ? (activeMetrics.isDragging 
         ? 'border-l-[6px] border-l-red-600 border-red-200 ring-1 ring-red-300 shadow-xs' 
-        : waitingMetrics.isWarning
+        : activeMetrics.isWarning
         ? 'border-l-4 border-amber-600'
         : 'border-l-4 border-amber-500')
     : isFait 
@@ -88,7 +101,7 @@ export function TaskCard({
     : isUrgent 
     ? 'bg-gradient-to-br from-red-50/70 via-white to-red-50/30' 
     : isAttente 
-    ? (waitingMetrics.isDragging ? 'bg-gradient-to-br from-red-50/60 via-amber-50/30 to-white' : 'bg-amber-50/40') 
+    ? (activeMetrics.isDragging ? 'bg-gradient-to-br from-red-50/60 via-amber-50/30 to-white' : 'bg-amber-50/40') 
     : isFait 
     ? 'bg-slate-50/90' 
     : 'bg-white'
@@ -181,11 +194,18 @@ export function TaskCard({
         
         {/* Badges explicatifs de blocage par prérequis */}
         {isBlocked && (
-          blocker.type === 'waiting' && prereqTask ? (
+          blocker.type === 'waiting' && prereqReturn ? (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50/90 text-amber-950 border border-amber-300 px-2.5 py-1 text-xs font-semibold w-fit shadow-2xs">
               <Hourglass className="w-3.5 h-3.5 text-amber-600 shrink-0" />
               <span>
-                ⏳ Bloquée : en attente du retour {getTaskWaitingDetails(prereqTask).info.waitingOn ? `de ${getTaskWaitingDetails(prereqTask).info.waitingOn}` : `sur « ${prereqTask.title} »`}
+                ⏳ Bloquée : en attente du retour de <strong className="font-bold underline">{prereqReturn.waiting_on}</strong> sur « {prereqReturn.title} »
+              </span>
+            </div>
+          ) : blocker.type === 'waiting' && prereqTask ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50/90 text-amber-950 border border-amber-300 px-2.5 py-1 text-xs font-semibold w-fit shadow-2xs">
+              <Hourglass className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              <span>
+                ⏳ Bloquée : en attente du retour sur « {prereqTask.title} »
               </span>
             </div>
           ) : blocker.type === 'task' && prereqTask ? (
@@ -214,10 +234,15 @@ export function TaskCard({
 
         {/* Badges de prérequis satisfait */}
         {!isBlocked && !isFait && (
-          blocker.type === 'waiting' && prereqTask ? (
+          blocker.type === 'waiting' && prereqReturn ? (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 text-xs font-medium w-fit">
               <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span>✓ Retour reçu {getTaskWaitingDetails(prereqTask).info.waitingOn ? `de ${getTaskWaitingDetails(prereqTask).info.waitingOn}` : `sur « ${prereqTask.title} »`} (Débloquée !)</span>
+              <span>✓ Retour reçu de {prereqReturn.waiting_on} sur « {prereqReturn.title} » (Débloquée !)</span>
+            </div>
+          ) : blocker.type === 'waiting' && prereqTask ? (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 text-xs font-medium w-fit">
+              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>✓ Retour reçu sur « {prereqTask.title} » (Débloquée !)</span>
             </div>
           ) : blocker.type === 'task' && prereqTask ? (
             <div className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 text-xs font-medium w-fit">
@@ -240,55 +265,61 @@ export function TaskCard({
         {isAttente && (
           <div className={cn(
             "mt-2.5 rounded-xl border p-2.5 space-y-2 text-xs transition-all",
-            waitingMetrics.isDragging 
+            activeMetrics.isDragging 
               ? "bg-red-50/90 border-red-300 text-red-950 shadow-2xs" 
-              : waitingMetrics.isWarning
+              : activeMetrics.isWarning
               ? "bg-amber-50 border-amber-300 text-amber-950"
               : "bg-amber-50/60 border-amber-200 text-amber-900"
           )}>
             <div className="flex items-center justify-between gap-1">
               <span className="font-bold flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-amber-950">
                 <Hourglass className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                La balle est dans leur camp
+                En attente d'un retour
               </span>
-              {waitingMetrics.isDragging ? (
+              {activeMetrics.isDragging ? (
                 <Badge className="bg-red-600 text-white text-[10px] font-black uppercase px-1.5 py-0 shadow-2xs">
-                  ⚠️ Traîne ({waitingMetrics.daysWaiting}j)
+                  ⚠️ Traîne ({activeMetrics.daysWaiting}j)
                 </Badge>
               ) : (
                 <span className="text-[11px] font-medium text-slate-600">
-                  Attente : <strong>{waitingMetrics.daysWaiting}j</strong>
+                  Attente : <strong>{activeMetrics.daysWaiting}j</strong>
                 </span>
               )}
             </div>
 
             <div className="text-xs font-semibold text-slate-900">
-              {waitingInfo.waitingOn ? (
+              {associatedReturn ? (
+                <div className="space-y-0.5">
+                  <p className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">Retour attendu associé :</p>
+                  <p className="text-xs font-bold text-slate-900">{associatedReturn.title}</p>
+                  <p className="text-[11px] text-amber-900 font-medium">Interlocuteur : <strong>{associatedReturn.waiting_on}</strong> ({associatedReturn.target_type || 'Prestataire'})</p>
+                </div>
+              ) : waitingInfo.waitingOn ? (
                 <span>En attente de : <strong className="underline decoration-amber-400 font-bold">{waitingInfo.waitingOn}</strong></span>
               ) : (
-                <span className="italic text-slate-500">En attente d&apos;un retour tiers</span>
+                <span className="italic text-slate-500">Aucun retour attendu associé</span>
               )}
             </div>
 
             {/* Statut relance & bouton d'action */}
             <div className="flex items-center justify-between gap-2 pt-1 border-t border-amber-200/60">
               <div className="text-[11px]">
-                {waitingMetrics.followUpStatus === 'overdue' && (
+                {activeMetrics.followUpStatus === 'overdue' && (
                   <span className="font-bold text-red-700 flex items-center gap-1">
-                    🚨 Relance en retard ({Math.abs(waitingMetrics.daysDiffFollowUp || 0)}j)
+                    🚨 Relance en retard ({Math.abs(activeMetrics.daysDiffFollowUp || 0)}j)
                   </span>
                 )}
-                {waitingMetrics.followUpStatus === 'today' && (
+                {activeMetrics.followUpStatus === 'today' && (
                   <span className="font-bold text-amber-800 flex items-center gap-1">
                     🔔 À relancer aujourd&apos;hui !
                   </span>
                 )}
-                {waitingMetrics.followUpStatus === 'upcoming' && (
+                {activeMetrics.followUpStatus === 'upcoming' && (
                   <span className="text-slate-600">
-                    Relance : <strong>{waitingMetrics.formattedFollowUpDate}</strong>
+                    Relance : <strong>{activeMetrics.formattedFollowUpDate}</strong>
                   </span>
                 )}
-                {waitingMetrics.followUpStatus === 'none' && (
+                {activeMetrics.followUpStatus === 'none' && (
                   <span className="text-slate-400 italic">Pas de relance fixée</span>
                 )}
               </div>
@@ -302,7 +333,7 @@ export function TaskCard({
                   }}
                   className="text-[11px] px-2 py-0.5 rounded font-semibold bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 cursor-pointer transition-colors shadow-2xs shrink-0"
                 >
-                  Gérer relance &rarr;
+                  {associatedReturn ? "Changer retour →" : "Choisir retour →"}
                 </button>
               )}
             </div>

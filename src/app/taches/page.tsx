@@ -5,18 +5,25 @@ import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Task, CalendarEvent, TaskStatus } from '@/lib/types'
+import { Task, CalendarEvent, TaskStatus, WaitingReturn } from '@/lib/types'
 import { 
   formatTaskDescriptionWithBlocker, 
   checkTaskBlocked, 
   sortTasksWithBlockers 
 } from '@/lib/blockers'
+import { 
+  fetchWaitingReturns, 
+  createWaitingReturn, 
+  formatTaskWithWaitingReturn, 
+  extractWaitingReturnId 
+} from '@/lib/waiting-returns'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import { TaskFilters, TaskTab } from '@/components/tasks/TaskFilters'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
 import { TaskScheduleDialog, ScheduleEventData } from '@/components/tasks/TaskScheduleDialog'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 import { TaskWaitingDialog } from '@/components/tasks/TaskWaitingDialog'
+import { TaskSelectReturnDialog } from '@/components/tasks/TaskSelectReturnDialog'
 import { 
   formatTaskDescriptionWithWaiting, 
   removeWaitingTag, 
@@ -32,6 +39,7 @@ function TasksContent() {
 
   const [tasks, setTasks] = useState<Task[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [waitingReturns, setWaitingReturns] = useState<WaitingReturn[]>([])
   const [loading, setLoading] = useState(true)
 
   // Filters state
@@ -54,17 +62,23 @@ function TasksContent() {
   const [isWaitingOpen, setIsWaitingOpen] = useState(false)
   const [taskForWaiting, setTaskForWaiting] = useState<Task | null>(null)
 
+  // Dialogue de sélection du retour attendu
+  const [isSelectReturnOpen, setIsSelectReturnOpen] = useState(false)
+  const [taskForReturnSelect, setTaskForReturnSelect] = useState<Task | null>(null)
+
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null)
 
-  // Fetch initial tasks and events
+  // Fetch initial tasks, events and waiting returns
   const fetchTasks = async () => {
     setLoading(true)
-    const [tasksRes, eventsRes] = await Promise.all([
+    const [tasksRes, eventsRes, returnsRes] = await Promise.all([
       supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-      supabase.from('events').select('*').order('event_date', { ascending: true })
+      supabase.from('events').select('*').order('event_date', { ascending: true }),
+      fetchWaitingReturns(supabase)
     ])
     if (tasksRes.data) setTasks(tasksRes.data)
     if (eventsRes.data) setEvents(eventsRes.data as CalendarEvent[])
+    if (returnsRes) setWaitingReturns(returnsRes)
     setLoading(false)
   }
 
@@ -98,10 +112,21 @@ function TasksContent() {
   // Task status change
   const handleStatusChange = async (taskId: string, newStatus: TaskStatus) => {
     const currentTask = tasks.find(t => t.id === taskId)
-    let updatedDesc = currentTask?.description || null
+    if (!currentTask) return
 
-    if (newStatus === 'en cours' && currentTask?.description) {
-      updatedDesc = removeWaitingTag(currentTask.description)
+    // Si la tâche passe en attente de retour externe -> ouvrir le dialogue pour choisir le retour attendu
+    if (newStatus === 'en attente de retour externe') {
+      setTaskForReturnSelect(currentTask)
+      setIsSelectReturnOpen(true)
+      return
+    }
+
+    let updatedDesc = currentTask.description || ''
+
+    if (newStatus === 'en cours' || newStatus === 'fait') {
+      updatedDesc = removeWaitingTag(updatedDesc)
+      // Détacher l'étiquette de retour si la tâche n'est plus en attente
+      updatedDesc = formatTaskWithWaitingReturn(updatedDesc, null)
     }
 
     const { error } = await supabase
@@ -121,14 +146,100 @@ function TasksContent() {
           setFollowUpTask({ ...found, status: 'fait' })
           setIsFollowUpOpen(true)
         }
-      } else if (newStatus === 'en attente de retour externe') {
-        const found = tasks.find(t => t.id === taskId)
-        if (found) {
-          setTaskForWaiting(found)
-          setIsWaitingOpen(true)
-        }
       }
     }
+  }
+
+  // Associer un retour attendu existant à la tâche sélectionnée
+  const handleAssignWaitingReturn = async (returnId: string) => {
+    if (!taskForReturnSelect) return
+    const updatedDesc = formatTaskWithWaitingReturn(taskForReturnSelect.description || '', returnId)
+
+    const { error } = await supabase
+      .from('tasks')
+      .update({
+        status: 'en attente de retour externe',
+        description: updatedDesc,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', taskForReturnSelect.id)
+
+    if (!error) {
+      setTasks(prev => prev.map(t => t.id === taskForReturnSelect.id ? {
+        ...t,
+        status: 'en attente de retour externe',
+        description: updatedDesc
+      } : t))
+      const returnObj = waitingReturns.find(r => r.id === returnId)
+      showNotification(`✓ Tâche mise en attente du retour « ${returnObj?.title || 'tiers'} » !`)
+    }
+    setIsSelectReturnOpen(false)
+    setTaskForReturnSelect(null)
+  }
+
+  // Créer un nouveau retour attendu et l'associer immédiatement à la tâche
+  const handleCreateAndAssignWaitingReturn = async (data: {
+    title: string
+    waiting_on: string
+    target_type?: string
+    follow_up_date?: string
+    addToCalendar?: boolean
+  }) => {
+    if (!taskForReturnSelect) return
+    const newReturn = await createWaitingReturn(supabase, {
+      title: data.title,
+      waiting_on: data.waiting_on,
+      target_type: data.target_type || 'Prestataire',
+      follow_up_date: data.follow_up_date || null,
+      status: 'en attente'
+    })
+
+    if (newReturn) {
+      setWaitingReturns(prev => [newReturn, ...prev])
+      const updatedDesc = formatTaskWithWaitingReturn(taskForReturnSelect.description || '', newReturn.id)
+      const { error } = await supabase
+        .from('tasks')
+        .update({
+          status: 'en attente de retour externe',
+          description: updatedDesc,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', taskForReturnSelect.id)
+
+      if (!error) {
+        setTasks(prev => prev.map(t => t.id === taskForReturnSelect.id ? {
+          ...t,
+          status: 'en attente de retour externe',
+          description: updatedDesc
+        } : t))
+
+        if (data.addToCalendar) {
+          const eventDate = data.follow_up_date || new Date().toISOString().split('T')[0]
+          const { data: newEv } = await supabase
+            .from('events')
+            .insert([{
+              title: `Retour attendu : ${data.title.trim()} (${data.waiting_on.trim()})`,
+              description: `Retour attendu lié à la tâche « ${taskForReturnSelect.title} ».`,
+              event_date: eventDate,
+              end_date: null,
+              event_type: 'échéance',
+              status: 'à venir',
+              task_id: taskForReturnSelect.id,
+              vendor_id: null
+            }])
+            .select()
+            .single()
+
+          if (newEv) {
+            setEvents(prev => [...prev, newEv as CalendarEvent])
+          }
+        }
+
+        showNotification(`✓ Nouveau retour « ${newReturn.title} » créé et lié à la tâche${data.addToCalendar ? ' (avec rappel au calendrier)' : ''} !`)
+      }
+    }
+    setIsSelectReturnOpen(false)
+    setTaskForReturnSelect(null)
   }
 
   // Enregistrement spécifique pour le dialogue d'attente
@@ -166,11 +277,11 @@ function TasksContent() {
     )
 
     if (formData.status === 'en attente de retour externe') {
-      finalDescription = formatTaskDescriptionWithWaiting(finalDescription, {
-        waitingOn: formData.waitingOn || '',
-        followUpDate: formData.followUpDate || '',
-      })
+      if (formData.waitingReturnId) {
+        finalDescription = formatTaskWithWaitingReturn(finalDescription, formData.waitingReturnId)
+      }
     } else {
+      finalDescription = formatTaskWithWaitingReturn(finalDescription, null)
       finalDescription = removeWaitingTag(finalDescription)
     }
 
@@ -302,19 +413,19 @@ function TasksContent() {
 
       // Masquage optionnel des tâches bloquées
       if (hideBlocked && task.status !== 'fait') {
-        const { isBlocked } = checkTaskBlocked(task, tasks, events)
+        const { isBlocked } = checkTaskBlocked(task, tasks, events, waitingReturns)
         if (isBlocked) return false
       }
 
       return true
     })
 
-    return sortTasksWithBlockers(filtered, events)
-  }, [tasks, events, activeTab, filterCat, filterStatus, filterPriority, hideBlocked])
+    return sortTasksWithBlockers(filtered, events, waitingReturns)
+  }, [tasks, events, waitingReturns, activeTab, filterCat, filterStatus, filterPriority, hideBlocked])
 
   const activeTasks = useMemo(() => filteredTasks.filter(t => t.status !== 'fait'), [filteredTasks])
   const doneTasks = useMemo(() => filteredTasks.filter(t => t.status === 'fait'), [filteredTasks])
-  const blockedCount = useMemo(() => tasks.filter(t => t.status !== 'fait' && checkTaskBlocked(t, tasks, events).isBlocked).length, [tasks, events])
+  const blockedCount = useMemo(() => tasks.filter(t => t.status !== 'fait' && checkTaskBlocked(t, tasks, events, waitingReturns).isBlocked).length, [tasks, events, waitingReturns])
 
   if (loading) {
     return <div className="p-8 text-center text-slate-500">Chargement des tâches...</div>
@@ -441,6 +552,7 @@ function TasksContent() {
                       task={task}
                       allTasks={tasks}
                       allEvents={events}
+                      waitingReturns={waitingReturns}
                       onEdit={(t) => {
                         setEditingTask(t)
                         setIsFormOpen(true)
@@ -452,8 +564,8 @@ function TasksContent() {
                       }}
                       onStatusChange={handleStatusChange}
                       onManageWaiting={(t) => {
-                        setTaskForWaiting(t)
-                        setIsWaitingOpen(true)
+                        setTaskForReturnSelect(t)
+                        setIsSelectReturnOpen(true)
                       }}
                     />
                   ))}
@@ -483,6 +595,7 @@ function TasksContent() {
                     task={task}
                     allTasks={tasks}
                     allEvents={events}
+                    waitingReturns={waitingReturns}
                     onEdit={(t) => {
                       setEditingTask(t)
                       setIsFormOpen(true)
@@ -494,8 +607,8 @@ function TasksContent() {
                     }}
                     onStatusChange={handleStatusChange}
                     onManageWaiting={(t) => {
-                      setTaskForWaiting(t)
-                      setIsWaitingOpen(true)
+                      setTaskForReturnSelect(t)
+                      setIsSelectReturnOpen(true)
                     }}
                   />
                 ))}
@@ -515,6 +628,19 @@ function TasksContent() {
         editingTask={editingTask}
         tasks={tasks}
         events={events}
+        waitingReturns={waitingReturns}
+        onCreateReturnInline={async (title, waiting_on) => {
+          const created = await createWaitingReturn(supabase, {
+            title,
+            waiting_on,
+            target_type: 'Prestataire',
+            status: 'en attente'
+          })
+          if (created) {
+            setWaitingReturns(prev => [created, ...prev])
+          }
+          return created
+        }}
         onSave={handleSaveTask}
       />
 
@@ -549,6 +675,20 @@ function TasksContent() {
           setTaskForWaiting(null)
         }}
         onSave={handleSaveWaiting}
+      />
+
+      {/* Dialogue de sélection / création du retour attendu par une tâche */}
+      <TaskSelectReturnDialog
+        open={isSelectReturnOpen}
+        task={taskForReturnSelect}
+        waitingReturns={waitingReturns}
+        currentSelectedReturnId={taskForReturnSelect ? extractWaitingReturnId(taskForReturnSelect.description) : null}
+        onClose={() => {
+          setIsSelectReturnOpen(false)
+          setTaskForReturnSelect(null)
+        }}
+        onSelectReturn={handleAssignWaitingReturn}
+        onCreateAndSelectReturn={handleCreateAndAssignWaitingReturn}
       />
     </div>
   )

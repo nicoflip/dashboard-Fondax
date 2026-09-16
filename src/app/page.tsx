@@ -8,10 +8,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate } from '@/lib/utils'
 import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban, Hourglass } from 'lucide-react'
-import { Task, Project, CalendarEvent } from '@/lib/types'
+import { Task, Project, CalendarEvent, WaitingReturn } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 import { parseFlexibleEvent } from '@/lib/flexible-events'
-import { getTaskWaitingDetails, removeWaitingTag } from '@/lib/waiting'
+import { 
+  fetchWaitingReturns, 
+  updateWaitingReturn, 
+  getWaitingReturnMetrics 
+} from '@/lib/waiting-returns'
 
 export default function Dashboard() {
   const supabase = createClient()
@@ -25,7 +29,7 @@ export default function Dashboard() {
     upcomingEvents: 0 
   })
   const [highPriorityTasks, setHighPriorityTasks] = useState<Task[]>([])
-  const [waitingTasksList, setWaitingTasksList] = useState<Task[]>([])
+  const [waitingReturnsList, setWaitingReturnsList] = useState<WaitingReturn[]>([])
   const [upcomingEventsList, setUpcomingEventsList] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -40,35 +44,35 @@ export default function Dashboard() {
       const [
         openTasksRes,
         highPriorityCountRes,
-        waitingTasksRes,
         activeProjectsRes,
         upcomingEventsRes,
         topTasksRes,
-        eventsRes
+        eventsRes,
+        returnsRes
       ] = await Promise.all([
         supabase.from('tasks').select('*', { count: 'exact', head: true }).neq('status', 'fait'),
         supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('priority', 'haute').neq('status', 'fait'),
-        supabase.from('tasks').select('*').eq('status', 'en attente de retour externe').order('updated_at', { ascending: false }),
         supabase.from('projects').select('*', { count: 'exact', head: true }).eq('status', 'EN COURS'),
         supabase.from('events').select('*', { count: 'exact', head: true }).eq('status', 'à venir'),
         supabase.from('tasks').select('*').eq('priority', 'haute').neq('status', 'fait').order('created_at', { ascending: false }).limit(5),
-        supabase.from('events').select('*').gte('event_date', now).order('event_date', { ascending: true }).limit(5)
+        supabase.from('events').select('*').gte('event_date', now).order('event_date', { ascending: true }).limit(5),
+        fetchWaitingReturns(supabase)
       ])
 
-      const waitingList = waitingTasksRes.data || []
-      const waitingDueCount = waitingList.filter(t => {
-        const { metrics } = getTaskWaitingDetails(t)
+      const activeReturns = (returnsRes || []).filter(r => r.status === 'en attente')
+      const waitingDueCount = activeReturns.filter(r => {
+        const metrics = getWaitingReturnMetrics(r)
         return metrics.followUpStatus === 'overdue' || metrics.followUpStatus === 'today'
       }).length
-      const draggingCount = waitingList.filter(t => {
-        const { metrics } = getTaskWaitingDetails(t)
+      const draggingCount = activeReturns.filter(r => {
+        const metrics = getWaitingReturnMetrics(r)
         return metrics.isDragging
       }).length
 
       setStats({
         openTasks: openTasksRes.count || 0,
         highPriorityTasks: highPriorityCountRes.count || 0,
-        waitingTasksCount: waitingList.length,
+        waitingTasksCount: activeReturns.length,
         waitingDueCount,
         draggingCount,
         activeProjects: activeProjectsRes.count || 0,
@@ -76,34 +80,34 @@ export default function Dashboard() {
       })
 
       if (topTasksRes.data) setHighPriorityTasks(topTasksRes.data)
-      setWaitingTasksList(waitingList)
+      setWaitingReturnsList(activeReturns)
       if (eventsRes.data) setUpcomingEventsList(eventsRes.data)
       setLoading(false)
     }
     fetchData()
   }, [])
 
-  const handleResumeWaitingTask = async (task: Task) => {
-    const todayStr = new Date().toLocaleDateString('fr-FR')
-    const cleanDesc = removeWaitingTag(task.description)
-    const finalDesc = `${cleanDesc}\n[Retour reçu le ${todayStr}] Reprise de la tâche en cours.`
-
-    const { error } = await supabase
-      .from('tasks')
-      .update({
-        status: 'en cours',
-        description: finalDesc.trim(),
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', task.id)
-
-    if (!error) {
-      setWaitingTasksList(prev => prev.filter(t => t.id !== task.id))
-      setStats(prev => ({
-        ...prev,
-        waitingTasksCount: Math.max(0, prev.waitingTasksCount - 1),
-      }))
+  const handleMarkReturnReceived = async (returnItem: WaitingReturn) => {
+    await updateWaitingReturn(supabase, returnItem.id, { status: 'reçu' })
+    
+    // Débloquer ou reprendre les tâches qui attendaient ce retour
+    const { data: allTasks } = await supabase.from('tasks').select('*')
+    if (allTasks) {
+      for (const t of allTasks) {
+        if (t.status === 'en attente de retour externe' && t.description?.includes(`[waiting_return:${returnItem.id}]`)) {
+          await supabase.from('tasks').update({
+            status: 'en cours',
+            updated_at: new Date().toISOString()
+          }).eq('id', t.id)
+        }
+      }
     }
+
+    setWaitingReturnsList(prev => prev.filter(r => r.id !== returnItem.id))
+    setStats(prev => ({
+      ...prev,
+      waitingTasksCount: Math.max(0, prev.waitingTasksCount - 1),
+    }))
   }
 
   const toggleTaskStatus = async (task: Task) => {
@@ -281,7 +285,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <CardTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
-                      En attente de retour ({waitingTasksList.length})
+                      Retours attendus ({waitingReturnsList.length})
                     </CardTitle>
                     <p className="text-[11px] text-slate-500">
                       Balle dans leur camp • Délais & relances
@@ -297,16 +301,16 @@ export default function Dashboard() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {waitingTasksList.length === 0 ? (
+              {waitingReturnsList.length === 0 ? (
                 <div className="p-6 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-dashed">
-                  Aucun dossier en attente de tiers. La balle est toujours dans votre camp !
+                  Aucun retour en attente de tiers. La balle est toujours dans votre camp !
                 </div>
               ) : (
-                waitingTasksList.slice(0, 5).map(task => {
-                  const { info: waitingInfo, metrics } = getTaskWaitingDetails(task)
+                waitingReturnsList.slice(0, 5).map(returnItem => {
+                  const metrics = getWaitingReturnMetrics(returnItem)
                   return (
                     <div
-                      key={task.id}
+                      key={returnItem.id}
                       className={cn(
                         "rounded-xl border p-3.5 text-xs space-y-2 transition-all shadow-2xs",
                         metrics.isDragging 
@@ -318,12 +322,12 @@ export default function Dashboard() {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <h4 className="font-bold text-slate-900 text-sm truncate" title={task.title}>
-                            {task.title}
+                          <h4 className="font-bold text-slate-900 text-sm truncate" title={returnItem.title}>
+                            {returnItem.title}
                           </h4>
                           <div className="text-[11px] text-slate-600 mt-1 flex items-center gap-1.5 flex-wrap">
                             <span className="font-semibold text-amber-950">
-                              Attente de : <strong className="underline decoration-amber-400">{waitingInfo.waitingOn || 'Tiers externe'}</strong>
+                              Attente de : <strong className="underline decoration-amber-400">{returnItem.waiting_on}</strong> ({returnItem.target_type || 'Prestataire'})
                             </span>
                             <span>•</span>
                             <span className="text-slate-600">Depuis <strong>{metrics.daysWaiting} j</strong></span>
@@ -338,8 +342,8 @@ export default function Dashboard() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleResumeWaitingTask(task)}
-                          title="Le tiers a répondu : reprendre la tâche en cours"
+                          onClick={() => handleMarkReturnReceived(returnItem)}
+                          title="Le tiers a répondu : consigner la réponse reçue"
                           className="h-7 px-2.5 text-[11px] border-emerald-300 text-emerald-800 hover:bg-emerald-100 shrink-0 font-semibold cursor-pointer shadow-2xs"
                         >
                           ✓ Réponse reçue
@@ -370,10 +374,10 @@ export default function Dashboard() {
                         </div>
 
                         <Link
-                          href="/taches?tab=en-attente"
+                          href="/en-attente"
                           className="text-amber-800 hover:underline font-semibold ml-auto flex items-center gap-1"
                         >
-                          Gérer relance &rarr;
+                          Détails rubrique &rarr;
                         </Link>
                       </div>
                     </div>

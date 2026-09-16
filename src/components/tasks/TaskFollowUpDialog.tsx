@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Task, Project, EventType } from '@/lib/types'
-import { CheckCircle2, Calendar, FolderKanban, PlusCircle, ArrowRight, Clock } from 'lucide-react'
+import { createWaitingReturn } from '@/lib/waiting-returns'
+import { CheckCircle2, Calendar, FolderKanban, PlusCircle, ArrowRight, Clock, Hourglass, CalendarPlus, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface TaskFollowUpDialogProps {
@@ -20,7 +21,7 @@ interface TaskFollowUpDialogProps {
 
 export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: TaskFollowUpDialogProps) {
   const supabase = createClient()
-  const [selectedAction, setSelectedAction] = useState<'none' | 'calendar' | 'project' | 'next_task'>('none')
+  const [selectedAction, setSelectedAction] = useState<'none' | 'calendar' | 'project' | 'next_task' | 'waiting_return'>('none')
   
   // Projects list
   const [projects, setProjects] = useState<Project[]>([])
@@ -43,6 +44,14 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
   const [nextTaskTitle, setNextTaskTitle] = useState('')
   const [nextTaskDesc, setNextTaskDesc] = useState('')
   const [nextTaskPrio, setNextTaskPrio] = useState<'haute' | 'moyenne' | 'basse'>('moyenne')
+
+  // Waiting return form (Balle dans le camp d'un tiers)
+  const [waitTitle, setWaitTitle] = useState('')
+  const [waitOn, setWaitOn] = useState('')
+  const [waitTargetType, setWaitTargetType] = useState('Prestataire')
+  const [waitFollowUpDate, setWaitFollowUpDate] = useState('')
+  const [waitDesc, setWaitDesc] = useState('')
+  const [waitAddToCalendar, setWaitAddToCalendar] = useState(false)
 
   const [saving, setSaving] = useState(false)
 
@@ -71,6 +80,14 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
       setNextTaskTitle(`Suivi / Validation suite à : ${task.title}`)
       setNextTaskDesc(`Vérification de l'adoption et bon fonctionnement.`)
       setNextTaskPrio('moyenne')
+
+      // Waiting return default values
+      setWaitTitle(`Retour attendu suite à : ${task.title}`)
+      setWaitOn('')
+      setWaitTargetType('Prestataire')
+      setWaitFollowUpDate('')
+      setWaitDesc(`Fait suite à l'achèvement de la tâche : "${task.title}".`)
+      setWaitAddToCalendar(false)
 
       setSelectedAction('none')
     }
@@ -139,6 +156,7 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
     }
   }
 
+
   const handleSaveNextTask = async () => {
     if (!nextTaskTitle) return
     setSaving(true)
@@ -153,6 +171,40 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
     if (!error) {
       onSuccessMessage?.(`Tâche suivante "${nextTaskTitle}" créée avec succès !`)
       onClose()
+    }
+  }
+
+  const handleSaveWaitingReturn = async () => {
+    if (!waitTitle.trim() || !waitOn.trim()) return
+    setSaving(true)
+    try {
+      const created = await createWaitingReturn(supabase, {
+        title: waitTitle.trim(),
+        waiting_on: waitOn.trim(),
+        target_type: waitTargetType,
+        follow_up_date: waitFollowUpDate || null,
+        description: waitDesc.trim() || null,
+        status: 'en attente'
+      })
+
+      if (created && waitAddToCalendar) {
+        const eventDate = waitFollowUpDate || new Date().toISOString().split('T')[0]
+        await supabase.from('events').insert([{
+          title: `Retour attendu : ${waitTitle.trim()} (${waitOn.trim()})`,
+          description: `Retour attendu suite à la tâche « ${task.title} ».`,
+          event_date: eventDate,
+          end_date: null,
+          event_type: 'échéance',
+          status: 'à venir',
+          task_id: task.id,
+          vendor_id: null
+        }])
+      }
+
+      onSuccessMessage?.(`✓ Retour attendu de ${waitOn.trim()} consigné dans la rubrique « En attente » !`)
+      onClose()
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -172,6 +224,26 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
         {/* Choix des suites logiques */}
         {selectedAction === 'none' && (
           <div className="grid grid-cols-1 gap-3">
+            {/* Option 1 : Déclarer un retour attendu */}
+            <button
+              onClick={() => setSelectedAction('waiting_return')}
+              className="flex items-start gap-4 p-4 rounded-xl border border-amber-300 bg-amber-50/40 hover:border-amber-500 hover:bg-amber-50 text-left transition-all group cursor-pointer"
+            >
+              <div className="p-2.5 rounded-lg bg-amber-200/80 text-amber-900 group-hover:bg-amber-600 group-hover:text-white transition-colors shrink-0">
+                <Hourglass className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <div className="font-semibold text-slate-900 flex items-center justify-between">
+                  Rajouter un retour en attente (Balle dans leur camp)
+                  <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-amber-600 transition-transform group-hover:translate-x-1" />
+                </div>
+                <p className="text-xs text-slate-600 mt-1">
+                  Vous avez fait votre part, et vous attendez désormais la réponse ou la validation d&apos;un tiers (prestataire, direction, collègue).
+                </p>
+              </div>
+            </button>
+
+            {/* Option 2 : Calendrier */}
             <button
               onClick={() => setSelectedAction('calendar')}
               className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 bg-white hover:border-blue-400 hover:bg-blue-50/40 text-left transition-all group cursor-pointer"
@@ -190,24 +262,26 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
               </div>
             </button>
 
+            {/* Option 3 : Chantier */}
             <button
               onClick={() => setSelectedAction('project')}
-              className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 bg-white hover:border-amber-400 hover:bg-amber-50/40 text-left transition-all group cursor-pointer"
+              className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 bg-white hover:border-emerald-400 hover:bg-emerald-50/40 text-left transition-all group cursor-pointer"
             >
-              <div className="p-2.5 rounded-lg bg-amber-100 text-amber-700 group-hover:bg-amber-600 group-hover:text-white transition-colors shrink-0">
+              <div className="p-2.5 rounded-lg bg-emerald-100 text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white transition-colors shrink-0">
                 <FolderKanban className="w-5 h-5" />
               </div>
               <div className="flex-1">
                 <div className="font-semibold text-slate-900 flex items-center justify-between">
                   Faire avancer un chantier IT lié
-                  <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-amber-600 transition-transform group-hover:translate-x-1" />
+                  <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600 transition-transform group-hover:translate-x-1" />
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Consigner cette avancée dans les notes d'un des 6 chantiers prioritaires (ERP ALTIOR, Lean, etc.).
+                  Consigner cette avancée dans les notes d&apos;un des 6 chantiers prioritaires (ERP ALTIOR, Lean, etc.).
                 </p>
               </div>
             </button>
 
+            {/* Option 4 : Tâche suivante */}
             <button
               onClick={() => setSelectedAction('next_task')}
               className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 bg-white hover:border-purple-400 hover:bg-purple-50/40 text-left transition-all group cursor-pointer"
@@ -456,6 +530,151 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
 
             <Button onClick={handleSaveNextTask} disabled={saving} className="w-full">
               {saving ? 'Création...' : 'Créer cette tâche'}
+            </Button>
+          </div>
+        )}
+
+        {/* Action D : Déclarer un retour attendu (Balle dans leur camp) */}
+        {selectedAction === 'waiting_return' && (
+          <div className="space-y-4 bg-slate-50 p-4 rounded-xl border border-amber-300">
+            <div className="flex items-center justify-between border-b border-amber-200 pb-2">
+              <span className="font-semibold text-sm text-slate-900 flex items-center gap-2">
+                <Hourglass className="w-4 h-4 text-amber-600" />
+                Rajouter un retour en attente (Balle dans leur camp)
+              </span>
+              <button 
+                onClick={() => setSelectedAction('none')} 
+                className="text-xs text-amber-800 hover:underline cursor-pointer font-medium"
+              >
+                ← Choisir autre chose
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-slate-800">
+                Objet du retour attendu <span className="text-red-500">*</span>
+              </Label>
+              <Input 
+                value={waitTitle} 
+                onChange={e => setWaitTitle(e.target.value)} 
+                placeholder="Ex: Validation devis Patrick, Réception matériel Orange..."
+                className="h-9 text-xs bg-white"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-slate-800">
+                  Interlocuteur / Tiers <span className="text-red-500">*</span>
+                </Label>
+                <Input 
+                  value={waitOn} 
+                  onChange={e => setWaitOn(e.target.value)} 
+                  placeholder="Ex: Orange, Direction, Patrick..."
+                  className="h-9 text-xs bg-white"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-slate-800">Type de tiers</Label>
+                <select
+                  className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  value={waitTargetType}
+                  onChange={e => setWaitTargetType(e.target.value)}
+                >
+                  <option value="Prestataire">Prestataire</option>
+                  <option value="Fournisseur">Fournisseur</option>
+                  <option value="Direction">Direction</option>
+                  <option value="Utilisateur">Utilisateur</option>
+                  <option value="Autre">Autre</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Date de relance (Optionnel) */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold text-slate-800">
+                  Date de relance prévue <span className="text-slate-400 font-normal">(Optionnel)</span>
+                </Label>
+                {waitFollowUpDate && (
+                  <button
+                    type="button"
+                    onClick={() => setWaitFollowUpDate('')}
+                    className="text-[10px] text-slate-400 hover:text-red-600 cursor-pointer underline"
+                  >
+                    Effacer
+                  </button>
+                )}
+              </div>
+              <Input
+                type="date"
+                value={waitFollowUpDate}
+                onChange={e => setWaitFollowUpDate(e.target.value)}
+                className="h-9 text-xs bg-white"
+              />
+              <div className="flex flex-wrap gap-1.5 pt-0.5">
+                {[
+                  { label: 'Demain', days: 1 },
+                  { label: 'Dans 3j', days: 3 },
+                  { label: 'Dans 1 sem.', days: 7 },
+                  { label: 'Dans 2 sem.', days: 14 }
+                ].map(({ label, days }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => {
+                      const d = new Date()
+                      d.setDate(d.getDate() + days)
+                      setWaitFollowUpDate(d.toISOString().split('T')[0])
+                    }}
+                    className="text-[10px] px-2 py-0.5 rounded border border-slate-200 bg-white text-slate-700 hover:bg-amber-100 cursor-pointer"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Retranscrire dans le calendrier */}
+            <div className="pt-1">
+              <label className="flex items-start gap-2.5 p-2 rounded-lg bg-white hover:bg-amber-50/50 border border-slate-200 cursor-pointer transition-colors">
+                <input
+                  type="checkbox"
+                  checked={waitAddToCalendar}
+                  onChange={e => setWaitAddToCalendar(e.target.checked)}
+                  className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 mt-0.5 h-4 w-4 cursor-pointer"
+                />
+                <div className="text-xs">
+                  <p className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <CalendarPlus className="w-3.5 h-3.5 text-purple-600" />
+                    Retranscrire dans le calendrier
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {waitFollowUpDate
+                      ? `Crée une échéance au calendrier le ${waitFollowUpDate}`
+                      : "Crée un rappel au calendrier pour le suivi de ce retour"}
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-slate-800">Description / Contexte (optionnel)</Label>
+              <Textarea 
+                value={waitDesc} 
+                onChange={e => setWaitDesc(e.target.value)} 
+                rows={2} 
+                className="text-xs bg-white"
+              />
+            </div>
+
+            <Button 
+              onClick={handleSaveWaitingReturn} 
+              disabled={!waitTitle.trim() || !waitOn.trim() || saving} 
+              className="w-full bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+            >
+              {saving ? 'Enregistrement...' : 'Enregistrer ce retour attendu'}
             </Button>
           </div>
         )}

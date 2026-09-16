@@ -25,9 +25,10 @@ export default function NotesPage() {
     setLoading(true)
     const { data, error } = await supabase.from('notes').select('*').order('updated_at', { ascending: false })
     if (data) {
-      setNotes(data)
-      if (data.length > 0 && !activeNote) {
-        setActiveNote(data[0])
+      const regularNotes = data.filter(n => n.category !== '__WAITING_RETURN__')
+      setNotes(regularNotes)
+      if (regularNotes.length > 0 && !activeNote) {
+        setActiveNote(regularNotes[0])
       }
     }
     setLoading(false)

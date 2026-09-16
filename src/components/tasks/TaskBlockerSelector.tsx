@@ -8,8 +8,10 @@ import {
   TaskCategory, 
   EventType,
   BlockerType,
-  BlockerConfig
+  BlockerConfig,
+  WaitingReturn
 } from '@/lib/types'
+import { getWaitingReturnMetrics } from '@/lib/waiting-returns'
 
 import { 
   cn, 
@@ -23,8 +25,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import { CustomDatePicker } from '@/components/ui/date-picker'
-import { parseWaitingInfo } from '@/lib/waiting'
 import { 
   Lock, 
   Unlock, 
@@ -41,17 +43,17 @@ import {
   Users,
   Phone,
   Flag,
-  FolderKanban
+  FolderKanban,
+  User
 } from 'lucide-react'
 
 export type { BlockerType, BlockerConfig }
-
-
 
 interface TaskBlockerSelectorProps {
   currentTaskId?: string
   tasks: Task[]
   events: CalendarEvent[]
+  waitingReturns?: WaitingReturn[]
   value: BlockerConfig
   onChange: (val: BlockerConfig) => void
 }
@@ -60,6 +62,7 @@ export function TaskBlockerSelector({
   currentTaskId,
   tasks,
   events,
+  waitingReturns = [],
   value,
   onChange
 }: TaskBlockerSelectorProps) {
@@ -72,21 +75,20 @@ export function TaskBlockerSelector({
 
   const [waitingSearch, setWaitingSearch] = useState('')
 
-  // Filter waiting tasks (status === 'en attente de retour externe' or currently selected)
-  const eligibleWaitingTasks = useMemo(() => {
-    return tasks.filter(t => (!currentTaskId || t.id !== currentTaskId) && (t.status === 'en attente de retour externe' || t.id === value.prereqTaskId))
-  }, [tasks, currentTaskId, value.prereqTaskId])
-
-  const filteredWaitingTasks = useMemo(() => {
+  // Filter waiting returns (retours attendus)
+  const filteredWaitingReturns = useMemo(() => {
     const q = waitingSearch.trim().toLowerCase()
-    return eligibleWaitingTasks.filter(t => {
+    const currentId = value.prereqReturnId || value.prereqTaskId
+    return waitingReturns.filter(r => {
+      if (r.status !== 'en attente' && r.id !== currentId) return false
       if (!q) return true
-      const titleMatch = t.title.toLowerCase().includes(q)
-      const descMatch = (t.description || '').toLowerCase().includes(q)
-      const catMatch = t.category.toLowerCase().includes(q)
-      return titleMatch || descMatch || catMatch
+      return (
+        r.title.toLowerCase().includes(q) ||
+        r.waiting_on.toLowerCase().includes(q) ||
+        (r.description || '').toLowerCase().includes(q)
+      )
     })
-  }, [eligibleWaitingTasks, waitingSearch])
+  }, [waitingReturns, waitingSearch, value.prereqReturnId, value.prereqTaskId])
 
   // Filter tasks
   const eligibleTasks = useMemo(() => {
@@ -122,10 +124,11 @@ export function TaskBlockerSelector({
   }, [events, eventSearch, eventTypeFilter])
 
   // Selected entities
-  const selectedWaitingTask = useMemo(() => {
-    if (value.type !== 'waiting' || !value.prereqTaskId) return null
-    return tasks.find(t => t.id === value.prereqTaskId) || null
-  }, [tasks, value])
+  const selectedWaitingReturn = useMemo(() => {
+    const returnId = value.prereqReturnId || value.prereqTaskId
+    if (value.type !== 'waiting' || !returnId) return null
+    return waitingReturns.find(r => r.id === returnId) || null
+  }, [waitingReturns, value])
 
   const selectedTask = useMemo(() => {
     if (value.type !== 'task' || !value.prereqTaskId) return null
@@ -294,11 +297,11 @@ export function TaskBlockerSelector({
         </div>
       )}
 
-      {/* MODE 2: BLOQUÉE PAR UN RETOUR TIERS EN ATTENTE */}
+      {/* MODE 2: BLOQUÉE PAR UN RETOUR TIERS ATTENDU */}
       {value.type === 'waiting' && (
         <div className="space-y-3 bg-white p-3.5 rounded-xl border border-amber-300 shadow-2xs">
-          {/* Selected Waiting Task Banner */}
-          {selectedWaitingTask ? (
+          {/* Selected Waiting Return Banner */}
+          {selectedWaitingReturn ? (
             <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-300 rounded-lg">
               <div className="flex items-center gap-2 min-w-0">
                 <div className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
@@ -306,23 +309,21 @@ export function TaskBlockerSelector({
                 </div>
                 <div className="min-w-0">
                   <p className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">
-                    Dossier / Retour bloquant sélectionné :
+                    Retour attendu bloquant sélectionné :
                   </p>
                   <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                    {selectedWaitingTask.title}
+                    {selectedWaitingReturn.title}
                   </p>
-                  {parseWaitingInfo(selectedWaitingTask.description).waitingOn && (
-                    <p className="text-[11px] text-amber-900">
-                      En attente de : <strong>{parseWaitingInfo(selectedWaitingTask.description).waitingOn}</strong>
-                    </p>
-                  )}
+                  <p className="text-[11px] text-amber-900">
+                    En attente de : <strong>{selectedWaitingReturn.waiting_on}</strong> ({selectedWaitingReturn.target_type || 'Prestataire'})
+                  </p>
                 </div>
               </div>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => onChange({ ...value, prereqTaskId: '' })}
+                onClick={() => onChange({ ...value, prereqReturnId: '', prereqTaskId: '' })}
                 className="h-7 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
               >
                 Changer
@@ -331,7 +332,7 @@ export function TaskBlockerSelector({
           ) : (
             <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Cliquez sur un dossier en attente ci-dessous pour qu&apos;il bloque cette tâche jusqu&apos;à réception du retour.</span>
+              <span>Cliquez sur un retour attendu ci-dessous pour qu&apos;il bloque cette tâche jusqu&apos;à réception de la réponse.</span>
             </div>
           )}
 
@@ -340,27 +341,28 @@ export function TaskBlockerSelector({
             <div className="relative">
               <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
               <Input
-                placeholder="Rechercher parmi les dossiers en attente ou interlocuteurs..."
+                placeholder="Rechercher parmi vos retours attendus ou interlocuteurs..."
                 value={waitingSearch}
                 onChange={e => setWaitingSearch(e.target.value)}
                 className="pl-9 h-9 text-xs"
               />
             </div>
 
-            {/* Waiting items list */}
+            {/* Waiting returns list */}
             <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100">
-              {filteredWaitingTasks.length === 0 ? (
+              {filteredWaitingReturns.length === 0 ? (
                 <p className="text-xs text-slate-400 italic text-center py-4">
-                  Aucun dossier en attente de retour externe trouvé.
+                  Aucun retour attendu trouvé. Créez-en un dans la rubrique « En attente ».
                 </p>
               ) : (
-                filteredWaitingTasks.map(t => {
-                  const isSelected = value.prereqTaskId === t.id
-                  const wInfo = parseWaitingInfo(t.description)
+                filteredWaitingReturns.map(r => {
+                  const currentId = value.prereqReturnId || value.prereqTaskId
+                  const isSelected = currentId === r.id
+                  const metrics = getWaitingReturnMetrics(r)
                   return (
                     <div
-                      key={t.id}
-                      onClick={() => onChange({ ...value, prereqTaskId: t.id })}
+                      key={r.id}
+                      onClick={() => onChange({ ...value, prereqReturnId: r.id, prereqTaskId: r.id })}
                       className={cn(
                         "p-2.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-3 text-left group",
                         isSelected
@@ -371,22 +373,19 @@ export function TaskBlockerSelector({
                       <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-bold text-xs text-slate-900 truncate">
-                            {t.title}
+                            {r.title}
                           </span>
-                          {wInfo.waitingOn && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold">
-                              Attente : {wInfo.waitingOn}
-                            </span>
-                          )}
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold">
+                            Tiers : {r.waiting_on}
+                          </span>
                         </div>
                         <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                          <span className={cn("px-1.5 py-0.2 rounded font-medium", STATUS_COLORS[t.status])}>
-                            {t.status}
-                          </span>
-                          {t.priority === 'haute' && (
-                            <span className="text-red-600 font-bold flex items-center gap-0.5">
-                              <Flame className="w-3 h-3" /> Haute
-                            </span>
+                          <span>Depuis {metrics.daysWaiting}j</span>
+                          {metrics.formattedFollowUpDate && (
+                            <span>• Relance : {metrics.formattedFollowUpDate}</span>
+                          )}
+                          {r.status === 'reçu' && (
+                            <Badge className="bg-emerald-600 text-white text-[9px] py-0">✓ Reçu</Badge>
                           )}
                         </div>
                       </div>
@@ -407,7 +406,7 @@ export function TaskBlockerSelector({
           </div>
 
           <p className="text-[11px] text-slate-500 italic">
-            ℹ️ Cette tâche restera bloquée tant que le dossier sélectionné est en attente de retour externe. Dès que vous recevez la réponse et repassez le dossier &laquo;&nbsp;En cours&nbsp;&raquo;, cette tâche sera automatiquement débloquée !
+            ℹ️ Cette tâche restera bloquée tant que ce retour est en attente. Dès que la réponse arrive dans la rubrique &laquo;&nbsp;En attente&nbsp;&raquo;, la tâche sera automatiquement débloquée !
           </p>
         </div>
       )}

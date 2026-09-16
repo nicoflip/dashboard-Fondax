@@ -5,28 +5,21 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Task, CalendarEvent, TaskStatus } from '@/lib/types'
+import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Task, CalendarEvent, WaitingReturn, WaitingReturnStatus } from '@/lib/types'
 import { 
-  checkTaskBlocked, 
-  formatTaskDescriptionWithBlocker 
-} from '@/lib/blockers'
-import { 
-  parseWaitingInfo, 
-  getTaskWaitingDetails, 
-  formatTaskDescriptionWithWaiting, 
-  removeWaitingTag,
-  WaitingConfig
-} from '@/lib/waiting'
-import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
-import { TaskWaitingDialog } from '@/components/tasks/TaskWaitingDialog'
-import { 
-  cn, 
-  TASK_CATEGORY_COLORS, 
-  PRIORITY_COLORS, 
-  STATUS_COLORS, 
-  formatDate 
-} from '@/lib/utils'
+  fetchWaitingReturns, 
+  createWaitingReturn, 
+  updateWaitingReturn, 
+  deleteWaitingReturn, 
+  getWaitingReturnMetrics,
+  extractWaitingReturnId 
+} from '@/lib/waiting-returns'
+import { checkTaskBlocked } from '@/lib/blockers'
+import { cn } from '@/lib/utils'
+import { FollowUpReturnDialog } from '@/components/waiting/FollowUpReturnDialog'
 import { 
   Hourglass, 
   Plus, 
@@ -41,10 +34,10 @@ import {
   Trash2, 
   Send, 
   User, 
-  FolderKanban,
   Check,
-  Calendar,
-  AlertCircle
+  Building2,
+  HelpCircle,
+  CalendarPlus
 } from 'lucide-react'
 
 type WaitingFilterTab = 'all' | 'due' | 'dragging' | 'blocking' | 'resolved'
@@ -52,6 +45,7 @@ type WaitingFilterTab = 'all' | 'due' | 'dragging' | 'blocking' | 'resolved'
 function EnAttenteContent() {
   const supabase = createClient()
 
+  const [waitingReturns, setWaitingReturns] = useState<WaitingReturn[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
@@ -62,26 +56,38 @@ function EnAttenteContent() {
   const [targetFilter, setTargetFilter] = useState<string>('ALL')
 
   // Modals
-  const [isFormOpen, setIsFormOpen] = useState(false)
-  const [editingTask, setEditingTask] = useState<Task | null>(null)
-  const [isWaitingDialogOpen, setIsWaitingDialogOpen] = useState(false)
-  const [taskForWaiting, setTaskForWaiting] = useState<Task | null>(null)
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
+  const [editingReturn, setEditingReturn] = useState<WaitingReturn | null>(null)
+  const [formTitle, setFormTitle] = useState('')
+  const [formWaitingOn, setFormWaitingOn] = useState('')
+  const [formTargetType, setFormTargetType] = useState('Prestataire')
+  const [formFollowUpDate, setFormFollowUpDate] = useState('')
+  const [formDescription, setFormDescription] = useState('')
+  const [formAddToCalendar, setFormAddToCalendar] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Modal de relance interactive
+  const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false)
+  const [followUpModalItem, setFollowUpModalItem] = useState<WaitingReturn | null>(null)
+
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null)
 
   // Fetch data
-  const fetchData = async () => {
+  const loadData = async () => {
     setLoading(true)
-    const [tasksRes, eventsRes] = await Promise.all([
+    const [returnsData, tasksRes, eventsRes] = await Promise.all([
+      fetchWaitingReturns(supabase),
       supabase.from('tasks').select('*').order('created_at', { ascending: false }),
       supabase.from('events').select('*').order('event_date', { ascending: true })
     ])
+    setWaitingReturns(returnsData)
     if (tasksRes.data) setTasks(tasksRes.data)
     if (eventsRes.data) setEvents(eventsRes.data as CalendarEvent[])
     setLoading(false)
   }
 
   useEffect(() => {
-    fetchData()
+    loadData()
   }, [])
 
   const showNotification = (msg: string) => {
@@ -89,321 +95,326 @@ function EnAttenteContent() {
     setTimeout(() => setNotificationMsg(null), 4500)
   }
 
-  // Waiting tasks (all tasks that are in waiting state)
-  const waitingTasks = useMemo(() => {
-    return tasks.filter(t => t.status === 'en attente de retour externe')
-  }, [tasks])
+  // Active returns (en attente)
+  const activeReturns = useMemo(() => {
+    return waitingReturns.filter(r => r.status === 'en attente')
+  }, [waitingReturns])
 
-  // Resolved waiting tasks (tasks that were recently waiting or have a waiting tag but are now done or en cours)
-  const resolvedWaitingTasks = useMemo(() => {
-    return tasks.filter(t => {
-      if (t.status === 'en attente de retour externe') return false
-      // Has received tag or completed
-      return (t.description || '').includes('[Retour reçu') || (t.description || '').includes('[waiting:')
-    })
-  }, [tasks])
+  // Resolved returns
+  const resolvedReturns = useMemo(() => {
+    return waitingReturns.filter(r => r.status === 'reçu')
+  }, [waitingReturns])
 
-  // Map: for each waiting task, get the list of internal tasks that are currently BLOCKED by it
-  const blockedTasksByWaitingTask = useMemo(() => {
+  // Map: for each WaitingReturn, which tasks in the company are waiting for it?
+  const tasksAwaitingReturnMap = useMemo(() => {
     const map = new Map<string, Task[]>()
-    
-    // Check every active task
+
     tasks.forEach(t => {
-      if (t.status === 'fait') return
-      const blockedStatus = checkTaskBlocked(t, tasks, events)
-      if (blockedStatus.isBlocked && blockedStatus.blocker.type === 'waiting' && blockedStatus.blocker.prereqTaskId) {
-        const waitingId = blockedStatus.blocker.prereqTaskId
-        const currentList = map.get(waitingId) || []
-        currentList.push(t)
-        map.set(waitingId, currentList)
+      // 1. Tâche marquée en attente avec ce retour
+      const returnId = extractWaitingReturnId(t.description)
+      if (returnId) {
+        const list = map.get(returnId) || []
+        list.push(t)
+        map.set(returnId, list)
+        return
+      }
+
+      // 2. Condition de blocage par ce retour
+      const blocked = checkTaskBlocked(t, tasks, events, waitingReturns)
+      if (blocked.blocker.type === 'waiting' && (blocked.blocker.prereqReturnId || blocked.blocker.prereqTaskId)) {
+        const targetId = blocked.blocker.prereqReturnId || blocked.blocker.prereqTaskId!
+        const list = map.get(targetId) || []
+        if (!list.some(item => item.id === t.id)) {
+          list.push(t)
+          map.set(targetId, list)
+        }
       }
     })
 
     return map
-  }, [tasks, events])
+  }, [tasks, events, waitingReturns])
 
-  // Overall KPIs
-  const totalWaiting = waitingTasks.length
-  const draggingTasks = useMemo(() => {
-    return waitingTasks.filter(t => getTaskWaitingDetails(t).metrics.isDragging)
-  }, [waitingTasks])
-  const dueTasks = useMemo(() => {
-    return waitingTasks.filter(t => {
-      const { metrics } = getTaskWaitingDetails(t)
-      return metrics.followUpStatus === 'overdue' || metrics.followUpStatus === 'today'
+  // KPIs
+  const totalWaitingCount = activeReturns.length
+  const draggingReturns = useMemo(() => {
+    return activeReturns.filter(r => getWaitingReturnMetrics(r).isDragging)
+  }, [activeReturns])
+  const dueReturns = useMemo(() => {
+    return activeReturns.filter(r => {
+      const m = getWaitingReturnMetrics(r)
+      return m.followUpStatus === 'overdue' || m.followUpStatus === 'today'
     })
-  }, [waitingTasks])
-  const blockingWaitingTasks = useMemo(() => {
-    return waitingTasks.filter(t => {
-      const blockedList = blockedTasksByWaitingTask.get(t.id) || []
-      return blockedList.length > 0
-    })
-  }, [waitingTasks, blockedTasksByWaitingTask])
+  }, [activeReturns])
+
+  const blockingReturns = useMemo(() => {
+    return activeReturns.filter(r => (tasksAwaitingReturnMap.get(r.id) || []).length > 0)
+  }, [activeReturns, tasksAwaitingReturnMap])
 
   const totalBlockedTasksCount = useMemo(() => {
-    let count = 0
-    blockedTasksByWaitingTask.forEach(list => {
-      count += list.length
+    const taskIds = new Set<string>()
+    activeReturns.forEach(r => {
+      const list = tasksAwaitingReturnMap.get(r.id) || []
+      list.forEach(t => {
+        if (t.status !== 'fait') taskIds.add(t.id)
+      })
     })
-    return count
-  }, [blockedTasksByWaitingTask])
+    return taskIds.size
+  }, [activeReturns, tasksAwaitingReturnMap])
 
-  // Target interlocuteurs list for quick filters
+  // Interlocuteur filters
   const uniqueTargets = useMemo(() => {
     const set = new Set<string>()
-    waitingTasks.forEach(t => {
-      const { info } = getTaskWaitingDetails(t)
-      if (info.waitingOn) {
-        set.add(info.waitingOn.trim())
-      }
+    activeReturns.forEach(r => {
+      if (r.waiting_on) set.add(r.waiting_on.trim())
     })
     return Array.from(set)
-  }, [waitingTasks])
+  }, [activeReturns])
 
-  // Filtered displayed tasks
-  const displayedTasks = useMemo(() => {
-    let list = activeTab === 'resolved' ? resolvedWaitingTasks : waitingTasks
+  // Filtered returns to display
+  const displayedReturns = useMemo(() => {
+    let list = activeTab === 'resolved' ? resolvedReturns : activeReturns
 
-    // Tab filter
     if (activeTab === 'due') {
-      list = list.filter(t => {
-        const { metrics } = getTaskWaitingDetails(t)
-        return metrics.followUpStatus === 'overdue' || metrics.followUpStatus === 'today'
+      list = list.filter(r => {
+        const m = getWaitingReturnMetrics(r)
+        return m.followUpStatus === 'overdue' || m.followUpStatus === 'today'
       })
     } else if (activeTab === 'dragging') {
-      list = list.filter(t => getTaskWaitingDetails(t).metrics.isDragging)
+      list = list.filter(r => getWaitingReturnMetrics(r).isDragging)
     } else if (activeTab === 'blocking') {
-      list = list.filter(t => (blockedTasksByWaitingTask.get(t.id) || []).length > 0)
+      list = list.filter(r => (tasksAwaitingReturnMap.get(r.id) || []).length > 0)
     }
 
-    // Interlocuteur pill filter
     if (targetFilter !== 'ALL') {
-      list = list.filter(t => {
-        const { info } = getTaskWaitingDetails(t)
-        return info.waitingOn.toLowerCase().includes(targetFilter.toLowerCase())
-      })
+      list = list.filter(r => r.waiting_on.toLowerCase().includes(targetFilter.toLowerCase()))
     }
 
-    // Text search query
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase()
-      list = list.filter(t => {
-        const { info } = getTaskWaitingDetails(t)
-        const titleMatch = t.title.toLowerCase().includes(q)
-        const whoMatch = info.waitingOn.toLowerCase().includes(q)
-        const descMatch = (t.description || '').toLowerCase().includes(q)
-        const catMatch = t.category.toLowerCase().includes(q)
-        return titleMatch || whoMatch || descMatch || catMatch
+      list = list.filter(r => {
+        return (
+          r.title.toLowerCase().includes(q) ||
+          r.waiting_on.toLowerCase().includes(q) ||
+          (r.description || '').toLowerCase().includes(q)
+        )
       })
     }
 
-    // Sort: dragging and overdue first, then by days waiting descending
+    // Sort: overdue first, dragging first, then days waiting descending
     return [...list].sort((a, b) => {
-      const detailsA = getTaskWaitingDetails(a)
-      const detailsB = getTaskWaitingDetails(b)
-      
-      // Overdue first
-      const overdueA = detailsA.metrics.followUpStatus === 'overdue' ? 1 : 0
-      const overdueB = detailsB.metrics.followUpStatus === 'overdue' ? 1 : 0
+      const mA = getWaitingReturnMetrics(a)
+      const mB = getWaitingReturnMetrics(b)
+
+      const overdueA = mA.followUpStatus === 'overdue' ? 1 : 0
+      const overdueB = mB.followUpStatus === 'overdue' ? 1 : 0
       if (overdueA !== overdueB) return overdueB - overdueA
 
-      // Then dragging
-      const dragA = detailsA.metrics.isDragging ? 1 : 0
-      const dragB = detailsB.metrics.isDragging ? 1 : 0
+      const dragA = mA.isDragging ? 1 : 0
+      const dragB = mB.isDragging ? 1 : 0
       if (dragA !== dragB) return dragB - dragA
 
-      // Then days waiting descending
-      return detailsB.metrics.daysWaiting - detailsA.metrics.daysWaiting
+      return mB.daysWaiting - mA.daysWaiting
     })
-  }, [waitingTasks, resolvedWaitingTasks, activeTab, targetFilter, searchQuery, blockedTasksByWaitingTask])
+  }, [activeReturns, resolvedReturns, activeTab, targetFilter, searchQuery, tasksAwaitingReturnMap])
 
-  // ACTION 1: Response received -> unblocks dependent tasks!
-  const handleResumeTask = async (task: Task) => {
-    const todayStr = new Date().toLocaleDateString('fr-FR')
-    const cleanDesc = removeWaitingTag(task.description)
-    const finalDesc = `${cleanDesc}\n[Retour reçu le ${todayStr}] Reprise de la tâche en cours.`
-
-    const blockedList = blockedTasksByWaitingTask.get(task.id) || []
-
-    const { error } = await supabase
-      .from('tasks')
-      .update({
-        status: 'en cours',
-        description: finalDesc.trim(),
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', task.id)
-
-    if (!error) {
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'en cours', description: finalDesc.trim() } : t))
-      if (blockedList.length > 0) {
-        showNotification(`✓ Retour consigné ! Déblocage automatique de ${blockedList.length} tâche(s) : ${blockedList.map(t => t.title).join(', ')}.`)
-      } else {
-        showNotification(`✓ Retour consigné ! La tâche « ${task.title} » est reprise en cours.`)
-      }
-    }
+  // ACTION 1: Open modal for new return
+  const handleOpenNewReturn = () => {
+    setEditingReturn(null)
+    setFormTitle('')
+    setFormWaitingOn('')
+    setFormTargetType('Prestataire')
+    setFormFollowUpDate('')
+    setFormDescription('')
+    setFormAddToCalendar(false)
+    setIsReturnModalOpen(true)
   }
 
-  // ACTION 2: Quick follow-up (+3 days)
-  const handleQuickFollowUp = async (task: Task) => {
-    const info = parseWaitingInfo(task.description, task.updated_at, task.created_at)
-    const nextDate = new Date()
-    nextDate.setDate(nextDate.getDate() + 3)
-    const nextDateStr = nextDate.toISOString().split('T')[0]
-    const newCount = (info.followUpCount || 0) + 1
-    const todayStr = new Date().toLocaleDateString('fr-FR')
-
-    const waitingConfig: WaitingConfig = {
-      waitingOn: info.waitingOn || 'Tiers externe',
-      followUpDate: nextDateStr,
-      sinceDate: info.sinceDate || undefined,
-      followUpCount: newCount,
-    }
-
-    let updatedDesc = formatTaskDescriptionWithWaiting(task.description, waitingConfig)
-    updatedDesc = `${updatedDesc}\n[Suivi] Relance n°${newCount} effectuée le ${todayStr}. Prochaine relance fixée au ${nextDate.toLocaleDateString('fr-FR')}.`
-
-    const { error } = await supabase
-      .from('tasks')
-      .update({
-        description: updatedDesc,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', task.id)
-
-    if (!error) {
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, description: updatedDesc } : t))
-      showNotification(`✓ Relance n°${newCount} consignée pour « ${task.title} » (+3 jours) !`)
-    }
+  // ACTION 2: Open modal for edit
+  const handleOpenEditReturn = (item: WaitingReturn) => {
+    setEditingReturn(item)
+    setFormTitle(item.title)
+    setFormWaitingOn(item.waiting_on)
+    setFormTargetType(item.target_type || 'Prestataire')
+    setFormFollowUpDate(item.follow_up_date || '')
+    setFormDescription(item.description || '')
+    setFormAddToCalendar(false)
+    setIsReturnModalOpen(true)
   }
 
-  // ACTION 3: Save task from TaskFormDialog
-  const handleSaveTask = async (formData: TaskFormData) => {
-    let finalDescription = formatTaskDescriptionWithBlocker(
-      formData.description,
-      formData.blocker
-    )
-
-    if (formData.status === 'en attente de retour externe') {
-      finalDescription = formatTaskDescriptionWithWaiting(finalDescription, {
-        waitingOn: formData.waitingOn || '',
-        followUpDate: formData.followUpDate || '',
-      })
-    } else {
-      finalDescription = removeWaitingTag(finalDescription)
-    }
-
-    if (editingTask) {
-      const { data, error } = await supabase
-        .from('tasks')
-        .update({
-          title: formData.title,
-          description: finalDescription,
-          category: formData.category,
-          priority: formData.priority,
-          status: formData.status
+  // ACTION 3: Save return (create or update)
+  const handleSaveReturn = async () => {
+    if (!formTitle.trim() || !formWaitingOn.trim()) return
+    setIsSubmitting(true)
+    try {
+      if (editingReturn) {
+        await updateWaitingReturn(supabase, editingReturn.id, {
+          title: formTitle.trim(),
+          waiting_on: formWaitingOn.trim(),
+          target_type: formTargetType,
+          follow_up_date: formFollowUpDate || null,
+          description: formDescription.trim() || null
         })
-        .eq('id', editingTask.id)
-        .select()
-        .single()
 
-      if (data && !error) {
-        setTasks(prev => prev.map(t => t.id === data.id ? data : t))
-        setIsFormOpen(false)
-        showNotification('Dossier mis à jour avec succès.')
-      }
-    } else {
-      const { data, error } = await supabase
-        .from('tasks')
-        .insert([{
-          title: formData.title,
-          description: finalDescription,
-          category: formData.category,
-          priority: formData.priority,
-          status: formData.status
-        }])
-        .select()
-        .single()
+        if (formAddToCalendar && formFollowUpDate) {
+          await supabase.from('events').insert([{
+            title: `Relance : ${formTitle.trim()} (${formWaitingOn.trim()})`,
+            description: `Retour attendu auprès de ${formWaitingOn.trim()}.${formDescription ? ' ' + formDescription.trim() : ''}`,
+            event_date: formFollowUpDate,
+            end_date: null,
+            event_type: 'échéance',
+            status: 'à venir',
+            task_id: null,
+            vendor_id: null
+          }])
+        }
 
-      if (data && !error) {
-        setTasks(prev => [data, ...prev])
-        setIsFormOpen(false)
-        showNotification('Nouveau retour en attente créé avec succès.')
-      }
-    }
-  }
-
-  // ACTION 4: Save waiting dialog
-  const handleSaveWaitingDialog = async (taskId: string, newStatus: TaskStatus, newDescription: string) => {
-    const { error } = await supabase.from('tasks').update({
-      status: newStatus,
-      description: newDescription,
-      updated_at: new Date().toISOString()
-    }).eq('id', taskId)
-
-    if (!error) {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus, description: newDescription } : t))
-      if (newStatus === 'en cours') {
-        showNotification('✓ Réponse consignée : tâche reprise en cours !')
+        showNotification('Retour attendu mis à jour avec succès' + (formAddToCalendar ? ' et retranscrit au calendrier !' : '.'))
       } else {
-        showNotification('✓ Suivi d\'attente et relance mis à jour !')
+        const created = await createWaitingReturn(supabase, {
+          title: formTitle.trim(),
+          waiting_on: formWaitingOn.trim(),
+          target_type: formTargetType,
+          follow_up_date: formFollowUpDate || null,
+          description: formDescription.trim() || null,
+          status: 'en attente'
+        })
+
+        if (created && formAddToCalendar) {
+          const eventDate = formFollowUpDate || new Date().toISOString().split('T')[0]
+          await supabase.from('events').insert([{
+            title: `Retour attendu : ${formTitle.trim()} (${formWaitingOn.trim()})`,
+            description: `Retour attendu auprès de ${formWaitingOn.trim()}.${formDescription ? ' ' + formDescription.trim() : ''}`,
+            event_date: eventDate,
+            end_date: null,
+            event_type: 'échéance',
+            status: 'à venir',
+            task_id: null,
+            vendor_id: null
+          }])
+        }
+
+        showNotification('Nouveau retour attendu enregistré' + (formAddToCalendar ? ' et retranscrit au calendrier !' : '.'))
+      }
+      setIsReturnModalOpen(false)
+      const reloaded = await fetchWaitingReturns(supabase)
+      setWaitingReturns(reloaded)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // ACTION 4: Mark return as received (✓ Réponse reçue) -> UNBLOCKS TASKS!
+  const handleMarkReceived = async (returnItem: WaitingReturn) => {
+    await updateWaitingReturn(supabase, returnItem.id, {
+      status: 'reçu'
+    })
+
+    const awaitingTasks = tasksAwaitingReturnMap.get(returnItem.id) || []
+
+    // Si des tâches en attente de retour externe étaient liées, les repasser en cours
+    if (awaitingTasks.length > 0) {
+      for (const t of awaitingTasks) {
+        if (t.status === 'en attente de retour externe') {
+          await supabase.from('tasks').update({
+            status: 'en cours',
+            updated_at: new Date().toISOString()
+          }).eq('id', t.id)
+        }
       }
     }
-  }
 
-  // ACTION 5: Delete task
-  const handleDeleteTask = async (taskId: string) => {
-    if (!window.confirm('Voulez-vous vraiment supprimer ce dossier ?')) return
-    const { error } = await supabase.from('tasks').delete().eq('id', taskId)
-    if (!error) {
-      setTasks(prev => prev.filter(t => t.id !== taskId))
-      showNotification('Dossier supprimé.')
+    const reloadedReturns = await fetchWaitingReturns(supabase)
+    setWaitingReturns(reloadedReturns)
+
+    // Recharger les tâches
+    const { data: updatedTasks } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })
+    if (updatedTasks) setTasks(updatedTasks)
+
+    if (awaitingTasks.length > 0) {
+      showNotification(`✓ Réponse reçue de ${returnItem.waiting_on} ! Déblocage automatique de ${awaitingTasks.length} tâche(s) interne(s) : ${awaitingTasks.map(t => t.title).join(', ')}.`)
+    } else {
+      showNotification(`✓ Réponse reçue de ${returnItem.waiting_on} pour « ${returnItem.title} ».`)
     }
   }
 
-  // Open modal to create new waiting return
-  const handleOpenNewWaiting = () => {
-    setEditingTask({
-      id: '',
-      title: '',
-      description: '',
-      category: 'Prestataires',
-      priority: 'moyenne',
-      status: 'en attente de retour externe',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+  // ACTION 5: Open interactive follow-up modal
+  const handleOpenFollowUpModal = (returnItem: WaitingReturn) => {
+    setFollowUpModalItem(returnItem)
+    setIsFollowUpModalOpen(true)
+  }
+
+  // Confirmer la relance et son prochain délai
+  const handleConfirmFollowUp = async (newFollowUpDate: string | null, addToCalendar: boolean) => {
+    if (!followUpModalItem) return
+
+    const newCount = (followUpModalItem.follow_up_count || 0) + 1
+
+    await updateWaitingReturn(supabase, followUpModalItem.id, {
+      follow_up_date: newFollowUpDate,
+      follow_up_count: newCount
     })
-    setIsFormOpen(true)
+
+    if (addToCalendar && newFollowUpDate) {
+      await supabase.from('events').insert([{
+        title: `Relance n°${newCount} : ${followUpModalItem.title} (${followUpModalItem.waiting_on})`,
+        description: `Relance effectuée auprès de ${followUpModalItem.waiting_on}. Objet: ${followUpModalItem.title}.`,
+        event_date: newFollowUpDate,
+        end_date: null,
+        event_type: 'échéance',
+        status: 'à venir',
+        task_id: null,
+        vendor_id: null
+      }])
+    }
+
+    const reloaded = await fetchWaitingReturns(supabase)
+    setWaitingReturns(reloaded)
+
+    if (newFollowUpDate) {
+      showNotification(`✓ Relance n°${newCount} consignée pour « ${followUpModalItem.title} » ! Prochaine relance le ${newFollowUpDate}${addToCalendar ? ' (inscrite au calendrier)' : ''}.`)
+    } else {
+      showNotification(`✓ Relance n°${newCount} consignée pour « ${followUpModalItem.title} ». Aucune prochaine relance programmée.`)
+    }
+
+    setIsFollowUpModalOpen(false)
+    setFollowUpModalItem(null)
+  }
+
+  // ACTION 6: Delete return
+  const handleDeleteReturn = async (id: string) => {
+    if (!window.confirm('Voulez-vous vraiment supprimer ce retour attendu ?')) return
+    await deleteWaitingReturn(supabase, id)
+    const reloaded = await fetchWaitingReturns(supabase)
+    setWaitingReturns(reloaded)
+    showNotification('Retour attendu supprimé.')
   }
 
   if (loading) {
-    return <div className="p-8 text-center text-slate-500">Chargement des dossiers en attente...</div>
+    return <div className="p-8 text-center text-slate-500">Chargement de vos retours attendus...</div>
   }
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-amber-500 text-white shadow-xs">
-              <Hourglass className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-slate-900">En attente & Délégation</h1>
-              <p className="text-xs sm:text-sm text-slate-500">
-                Suivi des retours externes attendus et déblocage automatique des tâches internes.
-              </p>
-            </div>
+        <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-amber-500 text-white shadow-xs">
+            <Hourglass className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">En attente & Retours attendus</h1>
+            <p className="text-xs sm:text-sm text-slate-500">
+              Gérez les retours que vous attendez auprès de tiers et visualisez les tâches internes bloquées par ces réponses.
+            </p>
           </div>
         </div>
 
         <Button 
-          onClick={handleOpenNewWaiting} 
+          onClick={handleOpenNewReturn} 
           className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white cursor-pointer shadow-xs"
         >
           <Plus className="h-4 w-4" />
-          Nouveau retour en attente
+          Nouveau retour attendu
         </Button>
       </div>
 
@@ -415,9 +426,9 @@ function EnAttenteContent() {
         </div>
       )}
 
-      {/* 4 Indicateurs KPI Supérieurs */}
+      {/* 4 Indicateurs KPI */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {/* Total en attente */}
+        {/* Total retours attendus */}
         <Card 
           onClick={() => setActiveTab('all')}
           className={cn(
@@ -430,8 +441,8 @@ function EnAttenteContent() {
               <Hourglass className="h-5 w-5" />
             </div>
             <div>
-              <p className="text-xs font-semibold text-slate-500">Total en attente</p>
-              <h2 className="text-2xl font-bold text-slate-900">{totalWaiting}</h2>
+              <p className="text-xs font-semibold text-slate-500">Retours attendus</p>
+              <h2 className="text-2xl font-bold text-slate-900">{totalWaitingCount}</h2>
             </div>
           </CardContent>
         </Card>
@@ -441,7 +452,7 @@ function EnAttenteContent() {
           onClick={() => setActiveTab('dragging')}
           className={cn(
             "border transition-all cursor-pointer hover:shadow-md",
-            draggingTasks.length > 0 ? "border-red-200 bg-red-50/20" : "",
+            draggingReturns.length > 0 ? "border-red-200 bg-red-50/20" : "",
             activeTab === 'dragging' ? "ring-2 ring-red-500 border-red-400" : "hover:border-red-300"
           )}
         >
@@ -451,7 +462,7 @@ function EnAttenteContent() {
             </div>
             <div>
               <p className="text-xs font-semibold text-red-600">Qui traîne (&gt; 7j)</p>
-              <h2 className="text-2xl font-bold text-red-700">{draggingTasks.length}</h2>
+              <h2 className="text-2xl font-bold text-red-700">{draggingReturns.length}</h2>
             </div>
           </CardContent>
         </Card>
@@ -461,7 +472,7 @@ function EnAttenteContent() {
           onClick={() => setActiveTab('due')}
           className={cn(
             "border transition-all cursor-pointer hover:shadow-md",
-            dueTasks.length > 0 ? "border-amber-300 bg-amber-50/40" : "",
+            dueReturns.length > 0 ? "border-amber-300 bg-amber-50/40" : "",
             activeTab === 'due' ? "ring-2 ring-amber-600 border-amber-500" : "hover:border-amber-300"
           )}
         >
@@ -472,13 +483,13 @@ function EnAttenteContent() {
             <div>
               <div className="flex items-center gap-1.5">
                 <p className="text-xs font-bold text-amber-900">À relancer</p>
-                {dueTasks.length > 0 && (
+                {dueReturns.length > 0 && (
                   <span className="text-[9px] font-black bg-red-600 text-white px-1 py-0.2 rounded uppercase animate-pulse">
                     Urgent
                   </span>
                 )}
               </div>
-              <h2 className="text-2xl font-bold text-amber-950">{dueTasks.length}</h2>
+              <h2 className="text-2xl font-bold text-amber-950">{dueReturns.length}</h2>
             </div>
           </CardContent>
         </Card>
@@ -516,7 +527,7 @@ function EnAttenteContent() {
             )}
           >
             <span>Tous</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-700 text-slate-200">{totalWaiting}</span>
+            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-700 text-slate-200">{totalWaitingCount}</span>
           </button>
 
           <button
@@ -532,7 +543,7 @@ function EnAttenteContent() {
               "text-[10px] px-1.5 py-0.2 rounded-full",
               activeTab === 'due' ? "bg-amber-800 text-white" : "bg-amber-200 text-amber-900"
             )}>
-              {dueTasks.length}
+              {dueReturns.length}
             </span>
           </button>
 
@@ -549,7 +560,7 @@ function EnAttenteContent() {
               "text-[10px] px-1.5 py-0.2 rounded-full",
               activeTab === 'dragging' ? "bg-red-800 text-white" : "bg-red-200 text-red-900"
             )}>
-              {draggingTasks.length}
+              {draggingReturns.length}
             </span>
           </button>
 
@@ -566,7 +577,7 @@ function EnAttenteContent() {
               "text-[10px] px-1.5 py-0.2 rounded-full",
               activeTab === 'blocking' ? "bg-indigo-900 text-white" : "bg-indigo-200 text-indigo-950"
             )}>
-              {blockingWaitingTasks.length}
+              {blockingReturns.length}
             </span>
           </button>
 
@@ -578,12 +589,12 @@ function EnAttenteContent() {
               activeTab === 'resolved' ? "bg-emerald-700 text-white" : "bg-emerald-50 text-emerald-900 hover:bg-emerald-100 border border-emerald-200"
             )}
           >
-            <span>✓ Retours reçus récents</span>
+            <span>✓ Retours reçus</span>
             <span className={cn(
               "text-[10px] px-1.5 py-0.2 rounded-full",
               activeTab === 'resolved' ? "bg-emerald-900 text-white" : "bg-emerald-200 text-emerald-950"
             )}>
-              {resolvedWaitingTasks.length}
+              {resolvedReturns.length}
             </span>
           </button>
         </div>
@@ -592,7 +603,7 @@ function EnAttenteContent() {
         <div className="relative w-full sm:w-72 shrink-0">
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
           <Input
-            placeholder="Rechercher par mot-clé, tiers..."
+            placeholder="Rechercher par objet, tiers..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9 h-9 text-xs"
@@ -634,32 +645,32 @@ function EnAttenteContent() {
         </div>
       )}
 
-      {/* Liste des dossiers en attente */}
-      {displayedTasks.length === 0 ? (
+      {/* Liste des retours attendus */}
+      {displayedReturns.length === 0 ? (
         <Card className="flex flex-col items-center justify-center p-12 text-slate-500 border-dashed text-center">
           <Hourglass className="w-10 h-10 text-slate-300 mb-2" />
-          <p className="font-medium text-slate-600">Aucun dossier correspondant aux filtres sélectionnés.</p>
+          <p className="font-medium text-slate-600">Aucun retour attendu correspondant aux critères.</p>
           <p className="text-xs text-slate-400 mt-1">
+            {activeTab === 'all' && "Vous n'attendez aucun retour pour le moment. Cliquez sur « + Nouveau retour attendu » pour en créer un."}
             {activeTab === 'due' && "Toutes vos relances sont à jour !"}
-            {activeTab === 'dragging' && "Aucun dossier ne traîne depuis plus de 7 jours, parfait !"}
-            {activeTab === 'blocking' && "Aucun retour en attente ne bloque de tâches internes actuellement."}
-            {activeTab === 'all' && "La balle est toujours dans votre camp, aucun retour n'est attendu."}
+            {activeTab === 'dragging' && "Aucun retour ne traîne depuis plus de 7 jours."}
+            {activeTab === 'blocking' && "Aucun retour attendu ne bloque de tâches internes."}
           </p>
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {displayedTasks.map(task => {
-            const { info: waitingInfo, metrics } = getTaskWaitingDetails(task)
-            const blockedList = blockedTasksByWaitingTask.get(task.id) || []
-            const isResolved = task.status !== 'en attente de retour externe'
+          {displayedReturns.map(returnItem => {
+            const metrics = getWaitingReturnMetrics(returnItem)
+            const awaitingTasks = tasksAwaitingReturnMap.get(returnItem.id) || []
+            const isResolved = returnItem.status === 'reçu'
 
             return (
               <Card 
-                key={task.id}
+                key={returnItem.id}
                 className={cn(
                   "flex flex-col transition-all overflow-hidden border shadow-xs",
                   isResolved
-                    ? "border-slate-200 bg-slate-50/70 opacity-80"
+                    ? "border-slate-200 bg-slate-50/70 opacity-85"
                     : metrics.isDragging
                     ? "border-l-[6px] border-l-red-600 border-red-200 bg-gradient-to-br from-red-50/40 via-white to-amber-50/20 ring-1 ring-red-300/60"
                     : metrics.isWarning
@@ -667,25 +678,19 @@ function EnAttenteContent() {
                     : "border-l-[5px] border-l-amber-500 border-slate-200 bg-white"
                 )}
               >
-                {/* En-tête de la carte avec Interlocuteur */}
+                {/* En-tête : Tiers / Interlocuteur */}
                 <div className={cn(
                   "p-3.5 pb-2 border-b flex items-start justify-between gap-2",
-                  metrics.isDragging ? "bg-red-100/50 border-red-200" : "bg-amber-50/50 border-amber-100"
+                  metrics.isDragging ? "bg-red-100/50 border-red-200" : "bg-amber-50/60 border-amber-100"
                 )}>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="text-[10px] font-black uppercase tracking-wider text-amber-900 bg-amber-200/80 px-2 py-0.5 rounded">
-                        Interlocuteur
+                        {returnItem.target_type || 'Interlocuteur'}
                       </span>
-                      {waitingInfo.waitingOn ? (
-                        <span className="text-sm font-bold text-amber-950 truncate">
-                          {waitingInfo.waitingOn}
-                        </span>
-                      ) : (
-                        <span className="text-xs font-semibold text-slate-600 italic">
-                          Tiers externe non spécifié
-                        </span>
-                      )}
+                      <span className="text-sm font-bold text-amber-950 truncate">
+                        {returnItem.waiting_on}
+                      </span>
                     </div>
                   </div>
 
@@ -693,11 +698,8 @@ function EnAttenteContent() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      title="Modifier ce dossier"
-                      onClick={() => {
-                        setEditingTask(task)
-                        setIsFormOpen(true)
-                      }}
+                      title="Modifier ce retour"
+                      onClick={() => handleOpenEditReturn(returnItem)}
                       className="h-7 w-7 text-slate-500 hover:text-blue-600 hover:bg-blue-50 cursor-pointer"
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -705,8 +707,8 @@ function EnAttenteContent() {
                     <Button 
                       variant="ghost" 
                       size="icon" 
-                      title="Supprimer ce dossier"
-                      onClick={() => handleDeleteTask(task.id)}
+                      title="Supprimer ce retour"
+                      onClick={() => handleDeleteReturn(returnItem.id)}
                       className="h-7 w-7 text-slate-500 hover:text-red-600 hover:bg-red-50 cursor-pointer"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -714,39 +716,20 @@ function EnAttenteContent() {
                   </div>
                 </div>
 
-                {/* Corps de la carte */}
+                {/* Corps */}
                 <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
                   <div className="space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 
-                        onClick={() => {
-                          setEditingTask(task)
-                          setIsFormOpen(true)
-                        }}
-                        className="font-bold text-base text-slate-900 hover:text-blue-600 cursor-pointer line-clamp-2"
-                        title={task.title}
-                      >
-                        {task.title}
-                      </h3>
-                    </div>
+                    <h3 
+                      onClick={() => handleOpenEditReturn(returnItem)}
+                      className="font-bold text-base text-slate-900 hover:text-blue-600 cursor-pointer line-clamp-2"
+                      title={returnItem.title}
+                    >
+                      {returnItem.title}
+                    </h3>
 
-                    <div className="flex items-center gap-2 flex-wrap text-xs">
-                      <Badge variant="outline" className={cn("text-[11px] font-semibold", TASK_CATEGORY_COLORS[task.category])}>
-                        {task.category}
-                      </Badge>
-                      {task.priority === 'haute' && (
-                        <Badge className="bg-red-600 text-white font-bold flex items-center gap-1 text-[10px]">
-                          <Flame className="w-3 h-3 fill-amber-300 text-amber-300" /> Urgent
-                        </Badge>
-                      )}
-                      <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-semibold", STATUS_COLORS[task.status])}>
-                        {task.status}
-                      </span>
-                    </div>
-
-                    {waitingInfo.cleanDescription && (
-                      <p className="text-xs text-slate-600 line-clamp-2 pt-1 italic">
-                        {waitingInfo.cleanDescription}
+                    {returnItem.description && (
+                      <p className="text-xs text-slate-600 line-clamp-2 italic">
+                        {returnItem.description}
                       </p>
                     )}
                   </div>
@@ -756,62 +739,64 @@ function EnAttenteContent() {
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1 text-slate-600">
                         <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                        <span>En attente depuis :</span>
+                        <span>Attente :</span>
                       </span>
                       <span className="font-bold text-slate-900">
-                        {metrics.daysWaiting} jour{metrics.daysWaiting > 1 ? 's' : ''}
+                        {metrics.daysWaiting} jour{metrics.daysWaiting > 1 ? 's' : ''} (depuis le {metrics.formattedSinceDate})
                       </span>
                     </div>
 
-                    {metrics.isDragging && (
+                    {metrics.isDragging && !isResolved && (
                       <div className="bg-red-100 text-red-800 px-2 py-1 rounded text-[11px] font-bold flex items-center gap-1.5">
                         <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                        <span>⚠️ Dossier qui traîne (&gt; 7 jours) !</span>
+                        <span>⚠️ Ce dossier traîne (&gt; 7 jours) sans réponse !</span>
                       </div>
                     )}
 
                     <div className="pt-1.5 border-t border-slate-200 flex items-center justify-between text-[11px]">
                       <div>
-                        {metrics.followUpStatus === 'overdue' && (
+                        {metrics.followUpStatus === 'overdue' && !isResolved && (
                           <span className="font-bold text-red-700 flex items-center gap-1">
                             🚨 Relance en retard ({Math.abs(metrics.daysDiffFollowUp || 0)}j)
                           </span>
                         )}
-                        {metrics.followUpStatus === 'today' && (
+                        {metrics.followUpStatus === 'today' && !isResolved && (
                           <span className="font-bold text-amber-800 flex items-center gap-1">
                             🔔 À relancer aujourd&apos;hui !
                           </span>
                         )}
-                        {metrics.followUpStatus === 'upcoming' && (
+                        {metrics.followUpStatus === 'upcoming' && !isResolved && (
                           <span className="text-slate-600">
                             Prochaine relance : <strong>{metrics.formattedFollowUpDate}</strong>
                           </span>
                         )}
-                        {metrics.followUpStatus === 'none' && (
-                          <span className="text-slate-400 italic">Pas de date de relance</span>
+                        {(metrics.followUpStatus === 'none' || isResolved) && (
+                          <span className="text-slate-400 italic">
+                            {isResolved ? "Retour reçu" : "Pas de relance fixée"}
+                          </span>
                         )}
                       </div>
 
                       <span className="text-slate-500 font-medium">
-                        {waitingInfo.followUpCount} relance{waitingInfo.followUpCount > 1 ? 's' : ''}
+                        {returnItem.follow_up_count} relance{returnItem.follow_up_count > 1 ? 's' : ''}
                       </span>
                     </div>
                   </div>
 
-                  {/* SECTION CLÉ : TÂCHES INTERNES BLOQUÉES PAR CE RETOUR */}
+                  {/* TÂCHES INTERNES QUI ATTENDENT CE RETOUR */}
                   <div className="pt-1">
-                    {blockedList.length > 0 ? (
+                    {awaitingTasks.length > 0 ? (
                       <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-2.5 space-y-1.5">
                         <div className="flex items-center gap-1.5 text-indigo-950 font-bold text-xs">
                           <Lock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                          <span>🔒 Bloque {blockedList.length} tâche{blockedList.length > 1 ? 's' : ''} interne{blockedList.length > 1 ? 's' : ''} :</span>
+                          <span>🔒 {awaitingTasks.length} tâche{awaitingTasks.length > 1 ? 's' : ''} interne{awaitingTasks.length > 1 ? 's' : ''} attende{awaitingTasks.length > 1 ? 'nt' : ''} ce retour :</span>
                         </div>
-                        <ul className="space-y-1 pl-1">
-                          {blockedList.map(bt => (
-                            <li key={bt.id} className="text-[11px] text-indigo-900 flex items-center gap-1.5">
+                        <ul className="space-y-1 pl-1 max-h-24 overflow-y-auto">
+                          {awaitingTasks.map(t => (
+                            <li key={t.id} className="text-[11px] text-indigo-900 flex items-center gap-1.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
-                              <span className="font-semibold truncate">{bt.title}</span>
-                              <span className="text-[10px] text-indigo-600 font-normal">({bt.category})</span>
+                              <span className="font-semibold truncate">{t.title}</span>
+                              <span className="text-[10px] text-indigo-600 font-normal">({t.category})</span>
                             </li>
                           ))}
                         </ul>
@@ -819,22 +804,21 @@ function EnAttenteContent() {
                     ) : (
                       <div className="text-[11px] text-slate-400 italic flex items-center gap-1">
                         <Unlock className="w-3 h-3 text-slate-400 shrink-0" />
-                        <span>Ne bloque aucune tâche interne pour l&apos;instant.</span>
+                        <span>Aucune tâche interne n&apos;est actuellement liée à ce retour.</span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* Pied de carte avec actions directes */}
+                {/* Actions */}
                 <div className="p-3 bg-slate-50/90 border-t border-slate-200 flex items-center justify-between gap-2">
                   {!isResolved ? (
                     <>
-                      {/* Bouton Réponse Reçue */}
                       <Button
                         type="button"
                         size="sm"
-                        onClick={() => handleResumeTask(task)}
-                        title="Réponse obtenue : repasse la tâche en cours et débloque les tâches dépendantes"
+                        onClick={() => handleMarkReceived(returnItem)}
+                        title="La réponse est arrivée : marque le retour comme reçu et débloque les tâches associées"
                         className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shrink-0 cursor-pointer shadow-2xs"
                       >
                         <Check className="w-3.5 h-3.5 mr-1 stroke-[3]" />
@@ -846,26 +830,22 @@ function EnAttenteContent() {
                           type="button"
                           variant="outline"
                           size="sm"
-                          onClick={() => handleQuickFollowUp(task)}
-                          title="Consigner une relance effectuée maintenant et reporter de 3 jours"
-                          className="text-[11px] h-8 border-amber-300 text-amber-900 hover:bg-amber-100/70 cursor-pointer"
+                          onClick={() => handleOpenFollowUpModal(returnItem)}
+                          title="Consigner que vous venez de relancer votre interlocuteur et choisir la prochaine étape"
+                          className="text-[11px] h-8 border-amber-300 text-amber-900 hover:bg-amber-100/70 cursor-pointer font-semibold"
                         >
                           <Send className="w-3 h-3 mr-1 text-amber-600" />
-                          Relancé (+3j)
+                          Relancé...
                         </Button>
 
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => {
-                            setTaskForWaiting(task)
-                            setIsWaitingDialogOpen(true)
-                          }}
-                          title="Personnaliser les détails de relance et l'interlocuteur"
+                          onClick={() => handleOpenEditReturn(returnItem)}
                           className="text-[11px] h-8 text-slate-600 hover:text-slate-900 cursor-pointer"
                         >
-                          Gérer
+                          Modifier
                         </Button>
                       </div>
                     </>
@@ -873,19 +853,17 @@ function EnAttenteContent() {
                     <div className="w-full flex items-center justify-between text-xs text-emerald-800 font-semibold">
                       <span className="flex items-center gap-1">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        Retour reçu & dossier traité
+                        Retour reçu & tâches débloquées
                       </span>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() => {
-                          setEditingTask(task)
-                          setIsFormOpen(true)
-                        }}
-                        className="text-xs text-slate-600 hover:text-blue-600"
+                        onClick={() => updateWaitingReturn(supabase, returnItem.id, { status: 'en attente' }).then(loadData)}
+                        className="text-xs text-slate-500 hover:text-amber-800"
+                        title="Repasser ce retour en attente"
                       >
-                        Voir la tâche &rarr;
+                        Rouvrir l'attente
                       </Button>
                     </div>
                   )}
@@ -896,27 +874,164 @@ function EnAttenteContent() {
         </div>
       )}
 
-      {/* Dialogues */}
-      <TaskFormDialog
-        open={isFormOpen}
-        onClose={() => {
-          setIsFormOpen(false)
-          setEditingTask(null)
-        }}
-        editingTask={editingTask}
-        tasks={tasks}
-        events={events}
-        onSave={handleSaveTask}
-      />
+      {/* Dialogue Création / Modification d'un retour attendu */}
+      <Dialog open={isReturnModalOpen} onClose={() => setIsReturnModalOpen(false)} className="max-w-md">
+        <DialogHeader>
+          <div className="flex items-center gap-2 text-amber-600">
+            <Hourglass className="w-5 h-5" />
+            <DialogTitle className="text-lg">
+              {editingReturn ? 'Modifier le retour attendu' : 'Nouveau retour attendu'}
+            </DialogTitle>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Définissez ce que vous attendez auprès d&apos;un tiers extérieur.
+          </p>
+        </DialogHeader>
 
-      <TaskWaitingDialog
-        open={isWaitingDialogOpen}
-        task={taskForWaiting}
+        <div className="space-y-3.5 py-3">
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold text-slate-800">
+              Objet du retour attendu <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              value={formTitle}
+              onChange={e => setFormTitle(e.target.value)}
+              placeholder="Ex: Devis raccordement fibre, Validation budget..."
+              className="h-9 text-xs"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-slate-800">
+                Interlocuteur / Tiers <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                value={formWaitingOn}
+                onChange={e => setFormWaitingOn(e.target.value)}
+                placeholder="Ex: Orange, Direction, Patrick..."
+                className="h-9 text-xs"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold text-slate-800">Type de tiers</Label>
+              <select
+                value={formTargetType}
+                onChange={e => setFormTargetType(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-500"
+              >
+                <option value="Prestataire">Prestataire</option>
+                <option value="Fournisseur">Fournisseur</option>
+                <option value="Direction">Direction</option>
+                <option value="Utilisateur">Utilisateur</option>
+                <option value="Autre">Autre</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Date de relance (strictement optionnelle) */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold text-slate-800">
+                Date de relance prévue <span className="text-slate-400 font-normal">(Optionnel)</span>
+              </Label>
+              {formFollowUpDate && (
+                <button
+                  type="button"
+                  onClick={() => setFormFollowUpDate('')}
+                  className="text-[10px] text-slate-400 hover:text-red-600 cursor-pointer underline"
+                >
+                  Effacer la relance
+                </button>
+              )}
+            </div>
+            <Input
+              type="date"
+              value={formFollowUpDate}
+              onChange={e => setFormFollowUpDate(e.target.value)}
+              className="h-9 text-xs"
+            />
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {[
+                { label: 'Demain', days: 1 },
+                { label: 'Dans 3j', days: 3 },
+                { label: 'Dans 1 sem.', days: 7 },
+                { label: 'Dans 2 sem.', days: 14 }
+              ].map(({ label, days }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => {
+                    const d = new Date()
+                    d.setDate(d.getDate() + days)
+                    setFormFollowUpDate(d.toISOString().split('T')[0])
+                  }}
+                  className="text-[10px] px-2 py-0.5 rounded border border-slate-200 bg-slate-50 text-slate-700 hover:bg-amber-50 hover:text-amber-800 cursor-pointer"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Option calendrier */}
+          <div className="pt-1">
+            <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 cursor-pointer transition-colors">
+              <input
+                type="checkbox"
+                checked={formAddToCalendar}
+                onChange={e => setFormAddToCalendar(e.target.checked)}
+                className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 mt-0.5 h-4 w-4 cursor-pointer"
+              />
+              <div className="text-xs">
+                <p className="font-semibold text-slate-800 flex items-center gap-1.5">
+                  <CalendarPlus className="w-3.5 h-3.5 text-purple-600" />
+                  Retranscrire dans le calendrier
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {formFollowUpDate 
+                    ? `Crée une échéance au calendrier le ${formFollowUpDate}`
+                    : "Crée un rappel au calendrier pour le suivi de ce dossier"}
+                </p>
+              </div>
+            </label>
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold text-slate-800">Description / Références (optionnel)</Label>
+            <Input
+              value={formDescription}
+              onChange={e => setFormDescription(e.target.value)}
+              placeholder="Ex: Réf dossier #4829, envoyé le 12/09 par mail..."
+              className="h-9 text-xs"
+            />
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={() => setIsReturnModalOpen(false)} disabled={isSubmitting}>
+            Annuler
+          </Button>
+          <Button 
+            onClick={handleSaveReturn} 
+            disabled={!formTitle.trim() || !formWaitingOn.trim() || isSubmitting}
+            className="bg-amber-600 hover:bg-amber-700 text-white"
+          >
+            {isSubmitting ? 'Enregistrement...' : editingReturn ? 'Mettre à jour' : 'Créer le retour'}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Modal de relance interactive (choix du délai ou ne plus relancer) */}
+      <FollowUpReturnDialog
+        open={isFollowUpModalOpen}
+        returnItem={followUpModalItem}
         onClose={() => {
-          setIsWaitingDialogOpen(false)
-          setTaskForWaiting(null)
+          setIsFollowUpModalOpen(false)
+          setFollowUpModalItem(null)
         }}
-        onSave={handleSaveWaitingDialog}
+        onConfirm={handleConfirmFollowUp}
       />
     </div>
   )

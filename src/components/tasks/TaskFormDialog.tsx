@@ -12,13 +12,13 @@ import {
   TASK_PRIORITIES,
   cn
 } from '@/lib/utils'
-import { Task, CalendarEvent, TaskCategory, TaskPriority, TaskStatus, BlockerConfig, EventType } from '@/lib/types'
+import { Task, CalendarEvent, TaskCategory, TaskPriority, TaskStatus, BlockerConfig, EventType, WaitingReturn } from '@/lib/types'
 import { parseTaskBlocker } from '@/lib/blockers'
-import { parseWaitingInfo, removeWaitingTag } from '@/lib/waiting'
+import { extractWaitingReturnId, formatTaskWithWaitingReturn } from '@/lib/waiting-returns'
 import { TaskBlockerSelector } from './TaskBlockerSelector'
 import { CustomDatePicker } from '@/components/ui/date-picker'
 import { Badge } from '@/components/ui/badge'
-import { Hourglass, Calendar as CalendarIcon, User } from 'lucide-react'
+import { Hourglass, Calendar as CalendarIcon, User, Plus, Clock } from 'lucide-react'
 
 export interface TaskFormData {
   title: string
@@ -27,8 +27,7 @@ export interface TaskFormData {
   priority: TaskPriority
   status: TaskStatus
   blocker: BlockerConfig
-  waitingOn?: string
-  followUpDate?: string
+  waitingReturnId?: string | null
   createAlsoEvent?: boolean
   eventDate?: string
   eventType?: EventType
@@ -40,7 +39,9 @@ interface TaskFormDialogProps {
   editingTask: Task | null
   tasks: Task[]
   events: CalendarEvent[]
+  waitingReturns?: WaitingReturn[]
   onSave: (data: TaskFormData) => Promise<void>
+  onCreateReturnInline?: (title: string, waiting_on: string) => Promise<WaitingReturn | null>
 }
 
 const DEFAULT_FORM_DATA: TaskFormData = {
@@ -54,10 +55,10 @@ const DEFAULT_FORM_DATA: TaskFormData = {
     prereqTaskId: '',
     requiredStatus: 'fait',
     prereqEventId: '',
-    unlockDate: ''
+    unlockDate: '',
+    prereqReturnId: ''
   },
-  waitingOn: '',
-  followUpDate: '',
+  waitingReturnId: null,
   createAlsoEvent: false,
   eventDate: new Date().toISOString().split('T')[0],
   eventType: 'échéance'
@@ -69,21 +70,28 @@ export function TaskFormDialog({
   editingTask,
   tasks,
   events,
-  onSave
+  waitingReturns = [],
+  onSave,
+  onCreateReturnInline
 }: TaskFormDialogProps) {
   const [formData, setFormData] = useState<TaskFormData>(DEFAULT_FORM_DATA)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isCreatingReturnInline, setIsCreatingReturnInline] = useState(false)
+  const [inlineReturnTitle, setInlineReturnTitle] = useState('')
+  const [inlineReturnWho, setInlineReturnWho] = useState('')
 
   useEffect(() => {
     if (open) {
+      setIsCreatingReturnInline(false)
+      setInlineReturnTitle('')
+      setInlineReturnWho('')
       if (editingTask) {
         const blocker = parseTaskBlocker(editingTask.description)
-        const waiting = parseWaitingInfo(editingTask.description)
-        const cleanDesc = removeWaitingTag(blocker.cleanDescription)
+        const returnId = extractWaitingReturnId(editingTask.description)
 
         setFormData({
           title: editingTask.title,
-          description: cleanDesc,
+          description: blocker.cleanDescription,
           category: editingTask.category,
           priority: editingTask.priority,
           status: editingTask.status,
@@ -92,10 +100,10 @@ export function TaskFormDialog({
             prereqTaskId: blocker.prereqTaskId || '',
             requiredStatus: blocker.requiredStatus || 'fait',
             prereqEventId: blocker.prereqEventId || '',
-            unlockDate: blocker.unlockDate || ''
+            unlockDate: blocker.unlockDate || '',
+            prereqReturnId: blocker.prereqReturnId || ''
           },
-          waitingOn: waiting.waitingOn || '',
-          followUpDate: waiting.followUpDate || '',
+          waitingReturnId: returnId,
           createAlsoEvent: false,
           eventDate: new Date().toISOString().split('T')[0],
           eventType: 'échéance'
@@ -187,72 +195,101 @@ export function TaskFormDialog({
           </select>
         </div>
 
-        {/* Configuration de l'attente externe si ce statut est choisi */}
+        {/* Choix du retour attendu si la tâche est en attente */}
         {formData.status === 'en attente de retour externe' && (
           <div className="rounded-xl border border-amber-300 bg-amber-50/60 p-3.5 space-y-3 shadow-2xs animate-in fade-in">
-            <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
-              <Hourglass className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Délégation : la balle est dans leur camp</span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                <Hourglass className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Quel retour cette tâche attend-elle ?</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCreatingReturnInline(v => !v)}
+                className="text-[11px] font-semibold text-amber-800 hover:text-amber-950 flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                {isCreatingReturnInline ? "Choisir existant" : "Nouveau retour"}
+              </button>
             </div>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-amber-950 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-amber-700" />
-                De qui / quoi attendez-vous le retour ?
-              </Label>
-              <Input
-                value={formData.waitingOn || ''}
-                onChange={e => setFormData({ ...formData, waitingOn: e.target.value })}
-                placeholder="Ex: Prestataire SFR, Direction (devis), Fournisseur..."
-                className="bg-white h-9 text-xs border-amber-200 focus-visible:ring-amber-500"
-              />
-              <div className="flex flex-wrap gap-1 pt-0.5">
-                {['Prestataire', 'Fournisseur', 'Direction', 'Utilisateur'].map(target => (
-                  <button
-                    key={target}
-                    type="button"
-                    onClick={() => setFormData({ ...formData, waitingOn: target })}
-                    className="text-[10px] px-2 py-0.5 rounded border border-amber-200 bg-white text-amber-900 hover:bg-amber-100 cursor-pointer"
-                  >
-                    + {target}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {!isCreatingReturnInline ? (
+              <div className="space-y-2">
+                <select
+                  value={formData.waitingReturnId || ''}
+                  onChange={e => setFormData({ ...formData, waitingReturnId: e.target.value || null })}
+                  className="flex h-10 w-full rounded-md border border-amber-300 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
+                >
+                  <option value="">-- Sélectionner un retour que vous attendez --</option>
+                  {waitingReturns.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.title} ({r.waiting_on}) {r.status === 'reçu' ? '✓ Reçu' : ''}
+                    </option>
+                  ))}
+                </select>
 
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-amber-950 flex items-center gap-1.5">
-                <CalendarIcon className="w-3.5 h-3.5 text-amber-700" />
-                Date de relance prévue
-              </Label>
-              <Input
-                type="date"
-                value={formData.followUpDate || ''}
-                onChange={e => setFormData({ ...formData, followUpDate: e.target.value })}
-                className="bg-white h-9 text-xs border-amber-200 focus-visible:ring-amber-500"
-              />
-              <div className="flex flex-wrap gap-1 pt-0.5">
-                {[
-                  { label: 'Demain', days: 1 },
-                  { label: 'Dans 3j', days: 3 },
-                  { label: 'Dans 1 sem.', days: 7 },
-                  { label: 'Dans 2 sem.', days: 14 }
-                ].map(({ label, days }) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => {
-                      const d = new Date()
-                      d.setDate(d.getDate() + days)
-                      setFormData({ ...formData, followUpDate: d.toISOString().split('T')[0] })
-                    }}
-                    className="text-[10px] px-2 py-0.5 rounded border border-amber-200 bg-white text-amber-900 hover:bg-amber-100 cursor-pointer"
-                  >
-                    {label}
-                  </button>
-                ))}
+                {formData.waitingReturnId && (
+                  (() => {
+                    const found = waitingReturns.find(r => r.id === formData.waitingReturnId)
+                    if (!found) return null
+                    return (
+                      <div className="p-2 bg-white rounded-lg border border-amber-200 text-xs flex items-center justify-between">
+                        <div>
+                          <p className="font-bold text-slate-900">{found.title}</p>
+                          <p className="text-[11px] text-slate-500">Tiers : <strong>{found.waiting_on}</strong> ({found.target_type || 'Prestataire'})</p>
+                        </div>
+                        {found.follow_up_date && (
+                          <span className="text-[11px] text-amber-900 bg-amber-100 px-2 py-0.5 rounded font-medium">
+                            Relance : {found.follow_up_date}
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })()
+                )}
+
+                {waitingReturns.length === 0 && (
+                  <p className="text-[11px] text-slate-500 italic">
+                    Aucun retour n'a encore été créé. Cliquez sur "+ Nouveau retour" pour définir ce que vous attendez.
+                  </p>
+                )}
               </div>
-            </div>
+            ) : (
+              /* Inline form to create new return */
+              <div className="space-y-2 bg-white p-3 rounded-lg border border-amber-200">
+                <p className="text-[11px] font-bold text-amber-900">Nouveau retour attendu :</p>
+                <Input
+                  placeholder="Objet du retour (ex: Devis fibre Orange, Validation devis...)"
+                  value={inlineReturnTitle}
+                  onChange={e => setInlineReturnTitle(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <Input
+                  placeholder="Interlocuteur (ex: Orange, Direction, Patrick...)"
+                  value={inlineReturnWho}
+                  onChange={e => setInlineReturnWho(e.target.value)}
+                  className="h-8 text-xs"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={async () => {
+                    if (!inlineReturnTitle.trim() || !inlineReturnWho.trim() || !onCreateReturnInline) return
+                    const created = await onCreateReturnInline(inlineReturnTitle.trim(), inlineReturnWho.trim())
+                    if (created) {
+                      setFormData(prev => ({ ...prev, waitingReturnId: created.id }))
+                      setIsCreatingReturnInline(false)
+                      setInlineReturnTitle('')
+                      setInlineReturnWho('')
+                    }
+                  }}
+                  disabled={!inlineReturnTitle.trim() || !inlineReturnWho.trim()}
+                  className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                >
+                  Créer et associer à cette tâche
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -316,11 +353,12 @@ export function TaskFormDialog({
           </div>
         )}
 
-        {/* Dépendance conditionnelle (Prérequis : Autre tâche, Événement calendrier ou Date précise) */}
+        {/* Dépendance conditionnelle */}
         <TaskBlockerSelector
           currentTaskId={editingTask?.id}
           tasks={tasks}
           events={events}
+          waitingReturns={waitingReturns}
           value={formData.blocker}
           onChange={b => setFormData({ ...formData, blocker: b })}
         />

@@ -159,6 +159,23 @@ export interface Note {
   updated_at: string
 }
 
+// Types pour les retours attendus (Section « En attente »)
+export type WaitingReturnStatus = 'en attente' | 'reçu' | 'archivé'
+
+export interface WaitingReturn {
+  id: string
+  title: string
+  waiting_on: string // Interlocuteur / Tiers (ex: "Orange", "Direction", "Patrick")
+  target_type?: string // "Prestataire" | "Fournisseur" | "Direction" | "Utilisateur" | "Autre"
+  description?: string | null
+  status: WaitingReturnStatus
+  follow_up_date?: string | null // YYYY-MM-DD
+  follow_up_count: number
+  since_date: string // YYYY-MM-DD
+  created_at: string
+  updated_at: string
+}
+
 // Types pour les prérequis et bloqueurs de tâches
 export type BlockerType = 'none' | 'task' | 'event' | 'date' | 'waiting'
 
@@ -168,6 +185,7 @@ export interface BlockerConfig {
   requiredStatus: TaskStatus
   prereqEventId?: string
   unlockDate?: string
+  prereqReturnId?: string
 }
 
 export interface TaskBlockerInfo {
@@ -176,6 +194,7 @@ export interface TaskBlockerInfo {
   requiredStatus: TaskStatus
   prereqEventId?: string
   unlockDate?: string
+  prereqReturnId?: string
   cleanDescription: string
 }
 
@@ -184,6 +203,7 @@ export interface TaskBlockedStatus {
   blocker: TaskBlockerInfo
   prereqTask?: Task
   prereqEvent?: CalendarEvent
+  prereqReturn?: WaitingReturn
   unlockDate?: string
 }
 
