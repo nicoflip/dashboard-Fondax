@@ -10,7 +10,8 @@ import { CustomDatePicker } from '@/components/ui/date-picker'
 import { Task, EventType, EventStatus } from '@/lib/types'
 import { parseTaskBlocker } from '@/lib/blockers'
 import { formatFlexibleEventDescription } from '@/lib/flexible-events'
-import { Calendar } from 'lucide-react'
+import { combineDateAndTime } from '@/lib/utils'
+import { Calendar, Clock } from 'lucide-react'
 
 export interface ScheduleEventData {
   title: string
@@ -37,6 +38,7 @@ export function TaskScheduleDialog({
 }: TaskScheduleDialogProps) {
   const [schedTitle, setSchedTitle] = useState('')
   const [schedDate, setSchedDate] = useState('')
+  const [schedTime, setSchedTime] = useState('')
   const [schedEndDate, setSchedEndDate] = useState('')
   const [schedIsFlexible, setSchedIsFlexible] = useState(false)
   const [schedFlexLabel, setSchedFlexLabel] = useState('Dans les 2 prochaines semaines')
@@ -52,6 +54,7 @@ export function TaskScheduleDialog({
       const defaultDate = new Date()
       defaultDate.setDate(defaultDate.getDate() + 1)
       setSchedDate(defaultDate.toISOString().split('T')[0])
+      setSchedTime('')
       setSchedEndDate('')
       setSchedIsFlexible(false)
       setSchedFlexLabel('Dans les 2 prochaines semaines')
@@ -68,10 +71,12 @@ export function TaskScheduleDialog({
         ? formatFlexibleEventDescription(schedNotes, schedFlexLabel || 'Dans les 2 prochaines semaines')
         : schedNotes
 
+      const finalEventDate = combineDateAndTime(schedDate, schedTime)
+
       await onSchedule({
         title: schedTitle.trim(),
         description: finalDesc,
-        event_date: schedDate,
+        event_date: finalEventDate,
         end_date: schedIsFlexible && schedEndDate ? schedEndDate : null,
         event_type: schedType,
         status: 'à venir',
@@ -105,7 +110,7 @@ export function TaskScheduleDialog({
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label>Date de l'événement</Label>
             <CustomDatePicker 
@@ -116,19 +121,44 @@ export function TaskScheduleDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="sched-type">Type d'événement</Label>
-            <select
-              id="sched-type"
-              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
-              value={schedType}
-              onChange={e => setSchedType(e.target.value as EventType)}
-            >
-              <option value="échéance">Échéance</option>
-              <option value="étape chantier">Étape chantier</option>
-              <option value="rdv">Rendez-vous terrain</option>
-              <option value="appel">Appel prestataire</option>
-            </select>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="sched-time" className="flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-blue-600" />
+                Heure (optionnel)
+              </Label>
+              {schedTime && (
+                <button
+                  type="button"
+                  onClick={() => setSchedTime('')}
+                  className="text-[10px] text-slate-400 hover:text-red-600 cursor-pointer"
+                >
+                  Effacer l'heure
+                </button>
+              )}
+            </div>
+            <Input
+              id="sched-time"
+              type="time"
+              value={schedTime}
+              onChange={e => setSchedTime(e.target.value)}
+              className="bg-white"
+            />
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="sched-type">Type d'événement</Label>
+          <select
+            id="sched-type"
+            className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+            value={schedType}
+            onChange={e => setSchedType(e.target.value as EventType)}
+          >
+            <option value="échéance">Échéance</option>
+            <option value="étape chantier">Étape chantier</option>
+            <option value="rdv">Rendez-vous terrain</option>
+            <option value="appel">Appel prestataire</option>
+          </select>
         </div>
 
         <div className="space-y-2">

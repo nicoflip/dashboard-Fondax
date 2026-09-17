@@ -11,13 +11,15 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
 import { CustomDatePicker } from '@/components/ui/date-picker'
+import { TaskSelector } from '@/components/ui/TaskSelector'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { PROJECT_STATUS_COLORS, PRIORITY_COLORS, STATUS_COLORS, cn } from '@/lib/utils'
 import { Project, ProjectStatus, Task, TaskPriority, TaskStatus, CalendarEvent } from '@/lib/types'
+import { isTaskInProject, formatTaskDescriptionWithProject, cleanTaskDescriptionProject } from '@/lib/projects'
 import { 
   Plus, Pencil, Trash2, FolderKanban, CheckCircle2, Clock, 
   ListTodo, Calendar, AlertTriangle, CheckSquare, Square, 
-  ArrowRight, Sparkles, ChevronRight, X, Layers, Flag
+  ArrowRight, Sparkles, ChevronRight, X, Layers, Flag, Link2, FolderMinus
 } from 'lucide-react'
 
 function ChantiersContent() {
@@ -54,6 +56,8 @@ function ChantiersContent() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskDesc, setNewTaskDesc] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('moyenne')
+  const [taskAttachMode, setTaskAttachMode] = useState<'create' | 'link'>('create')
+  const [taskToLink, setTaskToLink] = useState<string | null>(null)
 
   // New event form inside workspace
   const [newEventTitle, setNewEventTitle] = useState('')
@@ -255,6 +259,43 @@ function ChantiersContent() {
     await supabase.from('tasks').delete().eq('id', taskId)
     setTasks(prev => prev.filter(t => t.id !== taskId))
     showToast('Tâche supprimée')
+  }
+
+  // Link an existing task to this project
+  const handleLinkExistingTask = async () => {
+    if (!activeWorkspaceProject || !taskToLink) return
+    const taskObj = tasks.find(t => t.id === taskToLink)
+    if (!taskObj) return
+
+    const updatedDesc = formatTaskDescriptionWithProject(taskObj.description, activeWorkspaceProject.id)
+    const { error } = await supabase
+      .from('tasks')
+      .update({ description: updatedDesc })
+      .eq('id', taskToLink)
+
+    if (!error) {
+      setTasks(prev => prev.map(t => t.id === taskToLink ? { ...t, description: updatedDesc } : t))
+      setTaskToLink(null)
+      showToast('Tâche rattachée au chantier avec succès !')
+    } else {
+      showToast('Erreur lors du rattachement de la tâche')
+    }
+  }
+
+  // Detach a task from this project (remove project tag)
+  const handleDetachTaskFromProject = async (task: Task) => {
+    const updatedDesc = formatTaskDescriptionWithProject(task.description, null)
+    const { error } = await supabase
+      .from('tasks')
+      .update({ description: updatedDesc })
+      .eq('id', task.id)
+
+    if (!error) {
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, description: updatedDesc } : t))
+      showToast('Tâche détachée du chantier')
+    } else {
+      showToast('Erreur lors du détachement de la tâche')
+    }
   }
 
   // Add Event / Milestone to Calendar
@@ -651,45 +692,106 @@ function ChantiersContent() {
               {/* TAB 1: TASKS */}
               {workspaceTab === 'tasks' && (
                 <div className="space-y-6 max-w-3xl mx-auto">
-                  {/* Quick Add Task Form */}
-                  <form onSubmit={handleCreateProjectTask} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
-                    <div className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                      <Plus className="w-3.5 h-3.5 text-blue-600" />
-                      Ajouter une tâche spécifique à ce chantier
-                    </div>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Intitulé de la tâche..."
-                        value={newTaskTitle}
-                        onChange={e => setNewTaskTitle(e.target.value)}
-                        className="text-xs flex-1"
-                        required
+                  {/* Mode Selector: Create or Link Existing */}
+                  <div className="flex items-center gap-2 p-1 bg-slate-100/80 rounded-xl border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setTaskAttachMode('create')}
+                      className={cn(
+                        "flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                        taskAttachMode === 'create'
+                          ? "bg-white text-blue-700 shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Créer une nouvelle tâche
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTaskAttachMode('link')}
+                      className={cn(
+                        "flex-1 py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                        taskAttachMode === 'link'
+                          ? "bg-white text-blue-700 shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      )}
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      Rattacher une tâche existante
+                    </button>
+                  </div>
+
+                  {/* Mode 1: Quick Add Task Form */}
+                  {taskAttachMode === 'create' && (
+                    <form onSubmit={handleCreateProjectTask} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+                      <div className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5 text-blue-600" />
+                        Ajouter une tâche spécifique à ce chantier
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Intitulé de la tâche..."
+                          value={newTaskTitle}
+                          onChange={e => setNewTaskTitle(e.target.value)}
+                          className="text-xs flex-1"
+                          required
+                        />
+                        <select
+                          value={newTaskPriority}
+                          onChange={e => setNewTaskPriority(e.target.value as TaskPriority)}
+                          className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs shadow-xs text-slate-700"
+                        >
+                          <option value="haute">🚨 Haute</option>
+                          <option value="moyenne">⚡ Moyenne</option>
+                          <option value="basse">☕ Basse</option>
+                        </select>
+                        <Button type="submit" size="sm" className="bg-blue-600 hover:bg-blue-700 text-xs shrink-0 cursor-pointer">
+                          Ajouter
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+
+                  {/* Mode 2: Link Existing Task */}
+                  {taskAttachMode === 'link' && (
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+                      <div className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <Link2 className="w-3.5 h-3.5 text-blue-600" />
+                        Choisir une tâche existante à intégrer à ce chantier
+                      </div>
+                      <TaskSelector
+                        tasks={tasks.filter(t => !isTaskInProject(t, activeWorkspaceProject!))}
+                        value={taskToLink}
+                        onChange={setTaskToLink}
+                        placeholder="Rechercher une tâche non liée au chantier..."
                       />
-                      <select
-                        value={newTaskPriority}
-                        onChange={e => setNewTaskPriority(e.target.value as TaskPriority)}
-                        className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs shadow-xs text-slate-700"
-                      >
-                        <option value="haute">🚨 Haute</option>
-                        <option value="moyenne">⚡ Moyenne</option>
-                        <option value="basse">☕ Basse</option>
-                      </select>
-                      <Button type="submit" size="sm" className="bg-blue-600 hover:bg-blue-700 text-xs shrink-0 cursor-pointer">
-                        Ajouter
-                      </Button>
+                      <div className="flex justify-end pt-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={!taskToLink}
+                          onClick={handleLinkExistingTask}
+                          className="bg-blue-600 hover:bg-blue-700 text-xs gap-1.5 cursor-pointer disabled:opacity-50"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          Rattacher au chantier
+                        </Button>
+                      </div>
                     </div>
-                  </form>
+                  )}
 
                   {/* Tasks List */}
                   <div className="space-y-2">
                     {projectTasks.length === 0 ? (
                       <div className="text-center py-10 border-2 border-dashed border-slate-200 rounded-xl bg-white text-slate-500 text-xs">
                         <ListTodo className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                        Aucune tâche enregistrée pour ce chantier. Utilisez le formulaire ci-dessus pour en ajouter une !
+                        Aucune tâche enregistrée pour ce chantier. Utilisez le formulaire ci-dessus pour en ajouter ou en rattacher une !
                       </div>
                     ) : (
                       projectTasks.map(task => {
                         const isDone = task.status === 'fait'
+                        const cleanDesc = cleanTaskDescriptionProject(task.description)
                         return (
                           <div 
                             key={task.id}
@@ -715,9 +817,9 @@ function ChantiersContent() {
                                 <span className={cn("text-xs font-bold text-slate-900 block truncate", isDone && "line-through text-slate-400")}>
                                   {task.title}
                                 </span>
-                                {task.description && (
+                                {cleanDesc && (
                                   <span className="text-[11px] text-slate-500 block truncate">
-                                    {task.description.replace(/[chantier_id:[^]]+]/g, '').trim()}
+                                    {cleanDesc}
                                   </span>
                                 )}
                               </div>
@@ -732,9 +834,17 @@ function ChantiersContent() {
                               </Badge>
                               <button
                                 type="button"
+                                onClick={() => handleDetachTaskFromProject(task)}
+                                className="p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-colors cursor-pointer"
+                                title="Détacher du chantier (la tâche reste disponible dans Tâches)"
+                              >
+                                <FolderMinus className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => handleDeleteTask(task.id)}
                                 className="p-1 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                                title="Supprimer la tâche"
+                                title="Supprimer définitivement la tâche"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -799,22 +909,40 @@ function ChantiersContent() {
                         Aucune échéance planifiée pour ce chantier.
                       </div>
                     ) : (
-                      projectEvents.map(ev => (
-                        <div key={ev.id} className="p-3.5 rounded-xl border border-slate-200 bg-white shadow-xs flex items-center justify-between">
-                          <div className="flex items-center gap-2.5">
-                            <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
-                            <div>
-                              <div className="text-xs font-bold text-slate-900">{ev.title}</div>
-                              <div className="text-[11px] text-slate-500 font-mono">
-                                Date : {new Date(ev.event_date).toLocaleDateString('fr-FR')}
+                      projectEvents.map(ev => {
+                        const isClosed = ev.status === 'clos'
+                        return (
+                          <div 
+                            key={ev.id} 
+                            className={cn(
+                              "p-3.5 rounded-xl border bg-white shadow-xs flex items-center justify-between",
+                              isClosed ? "border-l-4 border-l-emerald-500 border-slate-200 bg-slate-50/50" : "border-slate-200"
+                            )}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              <Calendar className={cn("w-4 h-4 shrink-0", isClosed ? "text-emerald-600" : "text-blue-600")} />
+                              <div className="min-w-0">
+                                <div className={cn("text-xs font-bold truncate", isClosed ? "text-slate-500 line-through" : "text-slate-900")}>
+                                  {ev.title}
+                                </div>
+                                <div className="text-[11px] text-slate-500 font-mono">
+                                  Date : {new Date(ev.event_date).toLocaleDateString('fr-FR')}
+                                </div>
                               </div>
                             </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isClosed && (
+                                <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-300 font-semibold">
+                                  ✓ Clos
+                                </Badge>
+                              )}
+                              <Badge variant="outline" className="text-[10px] bg-slate-50">
+                                {ev.event_type}
+                              </Badge>
+                            </div>
                           </div>
-                          <Badge variant="outline" className="text-[10px] bg-slate-50">
-                            {ev.event_type}
-                          </Badge>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 </div>

@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate } from '@/lib/utils'
+import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate, formatEventDateTime } from '@/lib/utils'
 import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban, Hourglass } from 'lucide-react'
 import { Task, Project, CalendarEvent, WaitingReturn } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
@@ -55,7 +55,7 @@ export default function Dashboard() {
         supabase.from('projects').select('*', { count: 'exact', head: true }).eq('status', 'EN COURS'),
         supabase.from('events').select('*', { count: 'exact', head: true }).eq('status', 'à venir'),
         supabase.from('tasks').select('*').eq('priority', 'haute').neq('status', 'fait').order('created_at', { ascending: false }).limit(5),
-        supabase.from('events').select('*').gte('event_date', now).order('event_date', { ascending: true }).limit(5),
+        supabase.from('events').select('*').neq('status', 'clos').neq('status', 'passé').gte('event_date', now).order('event_date', { ascending: true }).limit(5),
         fetchWaitingReturns(supabase)
       ])
 
@@ -434,7 +434,7 @@ export default function Dashboard() {
                               Entre le {formatDate(event.event_date)} et le {formatDate(event.end_date)}
                             </span>
                           ) : (
-                            <span>{formatDate(event.event_date)}</span>
+                            <span>{formatEventDateTime(event.event_date, event.end_date)}</span>
                           )}
                         </div>
                       </div>

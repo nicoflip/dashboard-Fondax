@@ -148,17 +148,17 @@ export function checkTaskBlocked(
     return { isBlocked, blocker, prereqTask: prereq }
   }
 
+  const todayStr = new Date().toISOString().split('T')[0]
+
   if (blocker.type === 'event' && blocker.prereqEventId) {
     const ev = allEvents.find(item => item.id === blocker.prereqEventId)
     if (!ev) return { isBlocked: false, blocker }
-    const todayStr = new Date().toISOString().split('T')[0]
-    const isPast = ev.status === 'passé' || (ev.event_date && ev.event_date < todayStr)
-    const isBlocked = !isPast
+    const isResolved = ev.status === 'clos' || ev.status === 'passé' || (ev.event_date && ev.event_date < todayStr)
+    const isBlocked = !isResolved
     return { isBlocked, blocker, prereqEvent: ev }
   }
 
   if (blocker.type === 'date' && blocker.unlockDate) {
-    const todayStr = new Date().toISOString().split('T')[0]
     const isBlocked = todayStr < blocker.unlockDate
     return { isBlocked, blocker, unlockDate: blocker.unlockDate }
   }

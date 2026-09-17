@@ -57,12 +57,20 @@ import {
   EVENT_STATUSES, 
   EVENT_TYPE_LABELS, 
   formatDate, 
+  formatDateTime,
+  hasSpecificTime,
+  extractTimeFromDate,
+  combineDateAndTime,
+  formatTimeDisplay,
+  formatEventDateTime,
   cn, 
   PRIORITY_COLORS,
   TASK_CATEGORIES,
   TASK_PRIORITIES
 } from '@/lib/utils'
 import { parseFlexibleEvent } from '@/lib/flexible-events'
+import { parseEventClosureComment, formatEventDescriptionWithClosure } from '@/lib/closure-comments'
+import { EventClosureDialog } from '@/components/calendar/EventClosureDialog'
 
 // Helper: Format YYYY-MM-DD
 
@@ -195,13 +203,20 @@ function CalendrierInner() {
   const [formTitle, setFormTitle] = useState('')
   const [formDescription, setFormDescription] = useState('')
   const [formEventDate, setFormEventDate] = useState('')
+  const [formEventTime, setFormEventTime] = useState('')
   const [formEndDate, setFormEndDate] = useState('')
+  const [formEndTime, setFormEndTime] = useState('')
   const [formIsFlexible, setFormIsFlexible] = useState(false)
   const [formFlexLabel, setFormFlexLabel] = useState('Dans les 2 prochaines semaines')
   const [formEventType, setFormEventType] = useState<EventType>('rdv')
   const [formStatus, setFormStatus] = useState<EventStatus>('à venir')
+  const [formClosureComment, setFormClosureComment] = useState('')
   const [formTaskId, setFormTaskId] = useState('')
   const [formVendorId, setFormVendorId] = useState('')
+
+  // Clôture rapide avec motif
+  const [isClosureDialogOpen, setIsClosureDialogOpen] = useState(false)
+  const [eventToClose, setEventToClose] = useState<CalendarEvent | null>(null)
 
   // Option: Créer la tâche éponyme
   const [createAlsoTask, setCreateAlsoTask] = useState(false)
@@ -244,9 +259,12 @@ function CalendrierInner() {
     setEditingEvent(null)
     setFormTitle('')
     setFormDescription('')
+    setFormClosureComment('')
     const dateToSet = defaultDate || selectedDayDate || toYMD(new Date())
     setFormEventDate(dateToSet)
+    setFormEventTime('')
     setFormEndDate('')
+    setFormEndTime('')
     setFormIsFlexible(false)
     setFormFlexLabel('Dans les 2 prochaines semaines')
     setFormEventType('rdv')
@@ -263,7 +281,10 @@ function CalendrierInner() {
   const handleOpenEdit = (event: CalendarEvent) => {
     setEditingEvent(event)
     setFormTitle(event.title)
-    const parsed = parseFlexibleEvent(event.description)
+    const closure = parseEventClosureComment(event.description)
+    setFormClosureComment(closure.closureComment || '')
+
+    const parsed = parseFlexibleEvent(closure.cleanDesc)
     if (parsed.isFlexible) {
       setFormIsFlexible(true)
       setFormFlexLabel(parsed.flexLabel)
@@ -271,10 +292,12 @@ function CalendrierInner() {
     } else {
       setFormIsFlexible(false)
       setFormFlexLabel('Dans les 2 prochaines semaines')
-      setFormDescription(event.description || '')
+      setFormDescription(closure.cleanDesc || '')
     }
     setFormEventDate(event.event_date.split('T')[0])
+    setFormEventTime(extractTimeFromDate(event.event_date))
     setFormEndDate(event.end_date ? event.end_date.split('T')[0] : '')
+    setFormEndTime(extractTimeFromDate(event.end_date))
     setFormEventType(event.event_type)
     setFormStatus(event.status)
     setFormTaskId(event.task_id || '')
@@ -310,15 +333,23 @@ function CalendrierInner() {
       finalEndDate = toYMD(d)
     }
 
-    const finalDesc = formIsFlexible
+    let finalDesc = formIsFlexible
       ? `[Période flexible : ${formFlexLabel || 'Dans les 2 prochaines semaines'}]\n${formDescription}`.trim()
       : formDescription.trim()
+
+    finalDesc = formatEventDescriptionWithClosure(
+      finalDesc,
+      formStatus === 'clos' ? formClosureComment : null
+    ) || ''
+
+    const finalEventDate = combineDateAndTime(formEventDate, formEventTime)
+    const finalEndDateTime = finalEndDate ? combineDateAndTime(finalEndDate, formEndTime) : null
 
     const payload = {
       title: formTitle.trim(),
       description: finalDesc || null,
-      event_date: formEventDate,
-      end_date: finalEndDate,
+      event_date: finalEventDate,
+      end_date: finalEndDateTime,
       event_type: formEventType,
       status: formStatus,
       task_id: formTaskId || null,
@@ -375,10 +406,24 @@ function CalendrierInner() {
     }
   }
 
+  // Confirmer clôture avec commentaire
+  const handleConfirmClosure = async (event: CalendarEvent, comment: string) => {
+    const updatedDesc = formatEventDescriptionWithClosure(event.description, comment)
+    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, status: 'clos', description: updatedDesc } : e))
+    await supabase.from('events').update({ status: 'clos', description: updatedDesc }).eq('id', event.id)
+    showNotification(`Événement "${event.title}" clos avec succès !`)
+  }
+
   // Change event status directly
   const handleStatusChange = async (event: CalendarEvent, newStatus: EventStatus) => {
-    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, status: newStatus } : e))
-    await supabase.from('events').update({ status: newStatus }).eq('id', event.id)
+    if (newStatus === 'clos') {
+      setEventToClose(event)
+      setIsClosureDialogOpen(true)
+      return
+    }
+    const cleanDesc = formatEventDescriptionWithClosure(event.description, null)
+    setEvents(prev => prev.map(e => e.id === event.id ? { ...e, status: newStatus, description: cleanDesc } : e))
+    await supabase.from('events').update({ status: newStatus, description: cleanDesc }).eq('id', event.id)
   }
 
   // FullCalendar event click & date click
@@ -409,26 +454,52 @@ function CalendrierInner() {
       const conf = EVENT_TYPE_CONFIG[e.event_type] || EVENT_TYPE_CONFIG.rdv
       
       let color = conf.hex
-      if (e.status === 'passé') color = '#94a3b8'
+      if (e.status === 'clos') color = '#10b981'
+      else if (e.status === 'passé') color = '#94a3b8'
       else if (parsed.isFlexible) color = '#8b5cf6'
       else if (e.status === 'en attente') color = '#f59e0b'
 
+      const hasTime = hasSpecificTime(e.event_date)
       const startDate = e.event_date.split('T')[0]
+      const startTime = extractTimeFromDate(e.event_date)
       const hasEndDate = !!e.end_date
+      const hasEndTime = hasSpecificTime(e.end_date)
+      const endTime = extractTimeFromDate(e.end_date)
+
+      let calendarStart = startDate
+      if (hasTime && startTime) {
+        calendarStart = `${startDate}T${startTime}:00`
+      }
+
+      let calendarEnd: string | undefined = undefined
+      if (hasEndDate && e.end_date) {
+        const endDateStr = e.end_date.split('T')[0]
+        if (hasEndTime && endTime) {
+          calendarEnd = `${endDateStr}T${endTime}:00`
+        } else {
+          calendarEnd = getExclusiveEndDate(endDateStr)
+        }
+      }
+
+      const displayTitle = e.status === 'clos' 
+        ? `✓ ${e.title} [Clos]` 
+        : (parsed.isFlexible ? `⏳ ${e.title}` : e.title)
 
       return {
         id: e.id,
-        title: parsed.isFlexible ? `⏳ ${e.title}` : e.title,
-        start: startDate,
-        end: hasEndDate && e.end_date ? getExclusiveEndDate(e.end_date.split('T')[0]) : undefined,
-        allDay: true,
+        title: displayTitle,
+        start: calendarStart,
+        end: calendarEnd,
+        allDay: !hasTime,
         backgroundColor: color,
         borderColor: color,
         extendedProps: {
           eventType: e.event_type,
           status: e.status,
           isFlexible: parsed.isFlexible,
-          flexLabel: parsed.flexLabel
+          flexLabel: parsed.flexLabel,
+          hasTime,
+          timeStr: hasTime && startTime ? formatTimeDisplay(startTime) : ''
         }
       }
     })
@@ -444,9 +515,9 @@ function CalendrierInner() {
     })
   }, [events, selectedDayDate])
 
-  // KPIs
+  // KPIs (Excluent les événements clos pour ne pas alerter inutilement)
   const todayYMD = toYMD(new Date())
-  const todayCount = events.filter(e => e.event_date.startsWith(todayYMD)).length
+  const todayCount = events.filter(e => e.status !== 'clos' && e.event_date.startsWith(todayYMD)).length
   const now = new Date()
   const weekStart = new Date(now)
   weekStart.setDate(now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1))
@@ -456,12 +527,14 @@ function CalendrierInner() {
   const weekEndYMD = toYMD(weekEnd)
 
   const thisWeekCount = events.filter(e => {
+    if (e.status === 'clos') return false
     const d = e.event_date.split('T')[0]
     return d >= weekStartYMD && d <= weekEndYMD
   }).length
 
-  const flexibleCount = events.filter(e => parseFlexibleEvent(e.description).isFlexible).length
+  const flexibleCount = events.filter(e => e.status !== 'clos' && parseFlexibleEvent(e.description).isFlexible).length
   const pendingCount = events.filter(e => e.status === 'en attente').length
+  const closedCount = events.filter(e => e.status === 'clos').length
 
   // Chronological grouping for Agenda view
   const agendaGroups = useMemo(() => {
@@ -477,6 +550,7 @@ function CalendrierInner() {
       thisWeek: CalendarEvent[]
       nextWeek: CalendarEvent[]
       later: CalendarEvent[]
+      closed: CalendarEvent[]
       past: CalendarEvent[]
     } = {
       today: [],
@@ -484,12 +558,19 @@ function CalendrierInner() {
       thisWeek: [],
       nextWeek: [],
       later: [],
+      closed: [],
       past: []
     }
 
     filteredEvents.forEach(e => {
-      const eDate = new Date(e.event_date + 'T00:00:00')
-      if (eDate < today) {
+      // Les événements clos sont isolés dans leur propre section
+      if (e.status === 'clos') {
+        groups.closed.push(e)
+        return
+      }
+
+      const eDate = new Date(e.event_date.includes('T') ? e.event_date : e.event_date + 'T00:00:00')
+      if (eDate < today && toYMD(eDate) !== toYMD(today)) {
         groups.past.push(e)
       } else if (toYMD(eDate) === toYMD(today)) {
         groups.today.push(e)
@@ -509,6 +590,8 @@ function CalendrierInner() {
   const renderEventContent = (eventInfo: any) => {
     const type = eventInfo.event.extendedProps.eventType
     const isFlex = eventInfo.event.extendedProps.isFlexible
+    const hasTime = eventInfo.event.extendedProps.hasTime
+    const timeStr = eventInfo.event.extendedProps.timeStr
     const conf = EVENT_TYPE_CONFIG[type] || EVENT_TYPE_CONFIG.rdv
     const IconComponent = conf.icon
 
@@ -521,6 +604,11 @@ function CalendrierInner() {
           <Hourglass className="w-3 h-3 shrink-0 text-amber-200" />
         ) : (
           <IconComponent className="w-3 h-3 shrink-0 opacity-80" />
+        )}
+        {hasTime && timeStr && (
+          <span className="font-bold text-[10px] bg-black/25 text-white px-1 py-0.2 rounded shrink-0">
+            {timeStr}
+          </span>
         )}
         <span className="truncate">{eventInfo.event.title}</span>
       </div>
@@ -563,7 +651,7 @@ function CalendrierInner() {
       )}
 
       {/* KPI Cards Bar */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Aujourd'hui</p>
@@ -601,6 +689,16 @@ function CalendrierInner() {
           </div>
           <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
             <AlertCircle className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-2xs flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">Clos / Réglés</p>
+            <p className="text-2xl font-bold text-emerald-700 mt-0.5">{closedCount}</p>
+          </div>
+          <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+            <CheckCircle2 className="w-5 h-5" />
           </div>
         </div>
       </div>
@@ -738,17 +836,19 @@ function CalendrierInner() {
             {/* Filter by Status */}
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-slate-400 font-semibold mr-1">Statut :</span>
-              {['TOUS', 'à venir', 'en attente', 'passé'].map(st => (
+              {(['TOUS', 'à venir', 'en attente', 'passé', 'clos'] as const).map(st => (
                 <button
                   key={st}
                   type="button"
                   onClick={() => setStatusFilter(st)}
                   className={cn(
                     "px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer capitalize",
-                    statusFilter === st ? "bg-blue-600 text-white font-semibold shadow-2xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    statusFilter === st
+                      ? (st === 'clos' ? "bg-emerald-600 text-white font-semibold shadow-2xs" : "bg-blue-600 text-white font-semibold shadow-2xs")
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                   )}
                 >
-                  {st === 'TOUS' ? 'Tous' : st}
+                  {st === 'TOUS' ? 'Tous' : (st === 'clos' ? '✓ Clos' : st)}
                 </button>
               ))}
             </div>
@@ -844,7 +944,11 @@ function CalendrierInner() {
                     {eventsForSelectedDay.map(ev => {
                       const conf = EVENT_TYPE_CONFIG[ev.event_type] || EVENT_TYPE_CONFIG.rdv
                       const Icon = conf.icon
-                      const parsed = parseFlexibleEvent(ev.description)
+                      const closure = parseEventClosureComment(ev.description)
+                      const parsed = parseFlexibleEvent(closure.cleanDesc)
+
+                      const hasTime = hasSpecificTime(ev.event_date)
+                      const timeStr = extractTimeFromDate(ev.event_date)
 
                       return (
                         <div
@@ -857,18 +961,35 @@ function CalendrierInner() {
                               <span className={cn("p-1 rounded text-xs", conf.colorBg, conf.colorText)}>
                                 <Icon className="w-3 h-3" />
                               </span>
-                              <span className="font-semibold text-xs text-slate-900 truncate">
+                              <span className={cn("font-semibold text-xs truncate", ev.status === 'clos' ? "text-slate-500 line-through" : "text-slate-900")}>
                                 {ev.title}
                               </span>
                             </div>
+                            {hasTime && (
+                              <p className="text-[11px] font-semibold text-blue-700 flex items-center gap-1 mb-0.5">
+                                <Clock className="w-3 h-3" />
+                                <span>{formatEventDateTime(ev.event_date, ev.end_date)}</span>
+                              </p>
+                            )}
                             {parsed.cleanDesc && (
                               <p className="text-[11px] text-slate-500 line-clamp-1">
                                 {parsed.cleanDesc}
                               </p>
                             )}
+                            {ev.status === 'clos' && closure.closureComment && (
+                              <p className="text-[10px] text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 mt-1 line-clamp-2">
+                                ✓ Résolution : {closure.closureComment}
+                              </p>
+                            )}
                           </div>
-                          <Badge variant="outline" className="text-[10px] shrink-0 capitalize">
-                            {ev.status}
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] shrink-0 capitalize",
+                              ev.status === 'clos' ? "bg-emerald-50 text-emerald-700 border-emerald-300 font-semibold" : ""
+                            )}
+                          >
+                            {ev.status === 'clos' ? '✓ Clos' : ev.status}
                           </Badge>
                         </div>
                       )
@@ -887,40 +1008,46 @@ function CalendrierInner() {
                     Prochains événements
                   </CardTitle>
                   <span className="text-xs text-slate-400 font-medium">
-                    {events.filter(e => new Date(e.event_date) >= new Date(todayYMD)).length} à venir
+                    {events.filter(e => e.status !== 'clos' && e.status !== 'passé' && new Date(e.event_date) >= new Date(todayYMD)).length} à venir
                   </span>
                 </div>
               </CardHeader>
               <CardContent className="p-4 pt-1 divide-y divide-slate-100">
-                {events
-                  .filter(e => new Date(e.event_date) >= new Date(todayYMD))
-                  .slice(0, 5)
-                  .map(ev => {
-                    const conf = EVENT_TYPE_CONFIG[ev.event_type] || EVENT_TYPE_CONFIG.rdv
-                    const Icon = conf.icon
-                    const parsed = parseFlexibleEvent(ev.description)
+                {events.filter(e => e.status !== 'clos' && e.status !== 'passé' && new Date(e.event_date) >= new Date(todayYMD)).length === 0 ? (
+                  <p className="text-xs text-slate-400 py-3 text-center italic">
+                    Aucun événement à venir.
+                  </p>
+                ) : (
+                  events
+                    .filter(e => e.status !== 'clos' && e.status !== 'passé' && new Date(e.event_date) >= new Date(todayYMD))
+                    .slice(0, 5)
+                    .map(ev => {
+                      const conf = EVENT_TYPE_CONFIG[ev.event_type] || EVENT_TYPE_CONFIG.rdv
+                      const Icon = conf.icon
+                      const parsed = parseFlexibleEvent(ev.description)
 
-                    return (
-                      <div
-                        key={ev.id}
-                        onClick={() => handleOpenEdit(ev)}
-                        className="py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50 rounded-lg px-2 -mx-2 transition-colors cursor-pointer"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <Icon className={cn("w-3.5 h-3.5 shrink-0", conf.colorText)} />
-                            <p className="text-xs font-semibold text-slate-900 truncate">
-                              {ev.title}
+                      return (
+                        <div
+                          key={ev.id}
+                          onClick={() => handleOpenEdit(ev)}
+                          className="py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50 rounded-lg px-2 -mx-2 transition-colors cursor-pointer"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <Icon className={cn("w-3.5 h-3.5 shrink-0", conf.colorText)} />
+                              <p className="text-xs font-semibold text-slate-900 truncate">
+                                {ev.title}
+                              </p>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {parsed.isFlexible ? `⏳ ${parsed.flexLabel}` : formatEventDateTime(ev.event_date, ev.end_date)}
                             </p>
                           </div>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            {parsed.isFlexible ? `⏳ ${parsed.flexLabel}` : formatDate(ev.event_date)}
-                          </p>
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         </div>
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      </div>
-                    )
-                  })}
+                      )
+                    })
+                )}
               </CardContent>
             </Card>
           </div>
@@ -935,6 +1062,7 @@ function CalendrierInner() {
             { id: 'tomorrow', title: 'Demain', items: agendaGroups.tomorrow, badgeColor: 'bg-indigo-600 text-white' },
             { id: 'thisWeek', title: 'Cette semaine', items: agendaGroups.thisWeek, badgeColor: 'bg-slate-800 text-white' },
             { id: 'later', title: 'Prochainement (plus tard)', items: agendaGroups.later, badgeColor: 'bg-slate-600 text-white' },
+            { id: 'closed', title: 'Événements clos & réglés', items: agendaGroups.closed, badgeColor: 'bg-emerald-600 text-white' },
             { id: 'past', title: 'Événements passés', items: agendaGroups.past, badgeColor: 'bg-slate-400 text-white' }
           ].map(section => {
             if (section.items.length === 0) return null
@@ -954,17 +1082,25 @@ function CalendrierInner() {
                   {section.items.map(event => {
                     const conf = EVENT_TYPE_CONFIG[event.event_type] || EVENT_TYPE_CONFIG.rdv
                     const Icon = conf.icon
-                    const parsed = parseFlexibleEvent(event.description)
+                    const closure = parseEventClosureComment(event.description)
+                    const parsed = parseFlexibleEvent(closure.cleanDesc)
                     const linkedTask = tasks.find(t => t.id === event.task_id)
                     const linkedVendor = vendors.find(v => v.id === event.vendor_id)
                     const isUrgent = linkedTask?.priority === 'haute'
+                    const isClosed = event.status === 'clos'
 
                     return (
                       <Card
                         key={event.id}
                         className={cn(
                           "border transition-all hover:shadow-xs",
-                          isUrgent ? "border-l-4 border-l-red-500" : (parsed.isFlexible ? "border-l-4 border-l-purple-500" : "border-l-4 border-l-blue-500")
+                          isClosed
+                            ? "border-l-4 border-l-emerald-500 bg-slate-50/50 opacity-85"
+                            : isUrgent
+                            ? "border-l-4 border-l-red-500"
+                            : parsed.isFlexible
+                            ? "border-l-4 border-l-purple-500"
+                            : "border-l-4 border-l-blue-500"
                         )}
                       >
                         <CardHeader className="p-4 pb-2">
@@ -978,10 +1114,10 @@ function CalendrierInner() {
                                   {conf.label}
                                 </Badge>
                                 <span className="text-xs text-slate-500 font-medium">
-                                  {parsed.isFlexible ? `⏳ ${parsed.flexLabel}` : formatDate(event.event_date)}
+                                  {parsed.isFlexible ? `⏳ ${parsed.flexLabel}` : formatEventDateTime(event.event_date, event.end_date)}
                                 </span>
                               </div>
-                              <h3 className="font-bold text-sm text-slate-900 truncate">
+                              <h3 className={cn("font-bold text-sm truncate", isClosed ? "text-slate-500 line-through" : "text-slate-900")}>
                                 {event.title}
                               </h3>
                             </div>
@@ -993,6 +1129,7 @@ function CalendrierInner() {
                               onClick={(e) => e.stopPropagation()}
                               className={cn(
                                 "text-[11px] font-semibold rounded-md px-2 py-1 border transition-colors cursor-pointer",
+                                event.status === 'clos' ? "bg-emerald-50 text-emerald-700 border-emerald-300" :
                                 event.status === 'à venir' ? "bg-blue-50 text-blue-700 border-blue-200" :
                                 event.status === 'en attente' ? "bg-amber-50 text-amber-700 border-amber-200" :
                                 "bg-slate-100 text-slate-600 border-slate-200"
@@ -1000,6 +1137,7 @@ function CalendrierInner() {
                             >
                               <option value="à venir">À venir</option>
                               <option value="en attente">En attente</option>
+                              <option value="clos">✓ Clos / Réglé</option>
                               <option value="passé">Passé</option>
                             </select>
                           </div>
@@ -1010,6 +1148,16 @@ function CalendrierInner() {
                             <p className="text-xs text-slate-600 line-clamp-2">
                               {parsed.cleanDesc}
                             </p>
+                          )}
+
+                          {isClosed && closure.closureComment && (
+                            <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs">
+                              <div className="font-semibold text-emerald-800 flex items-center gap-1.5 mb-0.5">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Note de résolution / clôture :</span>
+                              </div>
+                              <p className="text-[11px] text-emerald-900 whitespace-pre-wrap">{closure.closureComment}</p>
+                            </div>
                           )}
 
                           <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
@@ -1181,6 +1329,26 @@ function CalendrierInner() {
               </div>
             </div>
 
+            {/* Champ Commentaire de Clôture lorsque le statut est "clos" */}
+            {formStatus === 'clos' && (
+              <div className="rounded-xl border border-emerald-300 bg-emerald-50/50 p-3.5 space-y-2 animate-in fade-in">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-950">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Commentaire de résolution / clôture (optionnel)</span>
+                </div>
+                <p className="text-[11px] text-emerald-800">
+                  Ce motif restera consigné pour l'historique et sera intégré aux rapports d'activité.
+                </p>
+                <textarea
+                  rows={2}
+                  value={formClosureComment}
+                  onChange={e => setFormClosureComment(e.target.value)}
+                  placeholder="Ex: Intervention fibre finalisée avec succès par SFR. Tout fonctionne nominalement."
+                  className="w-full rounded-md border border-emerald-300 bg-white p-2.5 text-xs text-slate-800 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                />
+              </div>
+            )}
+
             {/* Mode Date Flexible vs Date Fixe */}
             <div className="rounded-xl border border-purple-200 bg-purple-50/40 p-3.5 space-y-3">
               <div className="flex items-center justify-between">
@@ -1274,12 +1442,84 @@ function CalendrierInner() {
                   </div>
                 </div>
               ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <CustomDatePicker label="Date de l'événement" value={formEventDate} onChange={setFormEventDate} />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <CustomDatePicker label="Date de l'événement" value={formEventDate} onChange={setFormEventDate} />
+                    </div>
+                    <div>
+                      <CustomDatePicker label="Date de fin (optionnelle)" value={formEndDate} onChange={setFormEndDate} />
+                    </div>
                   </div>
-                  <div>
-                    <CustomDatePicker label="Date de fin (optionnelle)" value={formEndDate} onChange={setFormEndDate} />
+
+                  {/* Heures optionnelles (début et fin) */}
+                  <div className="p-2.5 rounded-lg bg-white border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Préciser une heure (optionnel)</span>
+                      </Label>
+                      {(formEventTime || formEndTime) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormEventTime('')
+                            setFormEndTime('')
+                          }}
+                          className="text-[11px] font-medium text-slate-400 hover:text-red-600 cursor-pointer"
+                        >
+                          Effacer l'heure
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="event-start-time" className="text-[11px] text-slate-500 font-medium">
+                          Heure de début
+                        </Label>
+                        <Input
+                          id="event-start-time"
+                          type="time"
+                          value={formEventTime}
+                          onChange={e => setFormEventTime(e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label htmlFor="event-end-time" className="text-[11px] text-slate-500 font-medium">
+                          Heure de fin
+                        </Label>
+                        <Input
+                          id="event-end-time"
+                          type="time"
+                          value={formEndTime}
+                          onChange={e => setFormEndTime(e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Raccourcis d'heures courantes */}
+                    <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-slate-100">
+                      <span className="text-[10px] text-slate-400 mr-1">Raccourcis :</span>
+                      {['08:30', '09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'].map(t => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setFormEventTime(t)}
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded border transition-colors cursor-pointer",
+                            formEventTime === t
+                              ? "bg-blue-600 text-white border-blue-600 font-bold"
+                              : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700"
+                          )}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1431,6 +1671,17 @@ function CalendrierInner() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Event Closure Dialog */}
+      <EventClosureDialog
+        isOpen={isClosureDialogOpen}
+        onClose={() => {
+          setIsClosureDialogOpen(false)
+          setEventToClose(null)
+        }}
+        event={eventToClose}
+        onConfirmClosure={handleConfirmClosure}
+      />
     </div>
   )
 }

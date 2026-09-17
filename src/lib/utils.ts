@@ -25,6 +25,86 @@ export function formatDateTime(date: string | Date): string {
   })
 }
 
+/**
+ * Vérifie si une chaîne de date contient une heure spécifique (non nulle / non 00:00:00Z / non toute la journée).
+ */
+export function hasSpecificTime(dateStr?: string | null): boolean {
+  if (!dateStr) return false
+  if (!dateStr.includes('T') && !dateStr.includes(' ')) return false
+  // Si le format se termine par T00:00:00 ou T00:00:00+00:00 ou T00:00:00Z -> pas d'heure spécifique
+  if (/T00:00:00(\.000)?(\+00:00|Z)?$/i.test(dateStr)) return false
+  if (/ 00:00:00$/i.test(dateStr)) return false
+  
+  const timePart = dateStr.includes('T') ? dateStr.split('T')[1] : dateStr.split(' ')[1]
+  if (!timePart) return false
+  const [hh, mm] = timePart.split(':')
+  return hh !== '00' || (mm !== undefined && mm !== '00' && !mm.startsWith('00'))
+}
+
+/**
+ * Extrait l'heure sous format HH:mm d'une chaîne de date (si présente et spécifique).
+ */
+export function extractTimeFromDate(dateStr?: string | null): string {
+  if (!dateStr || !hasSpecificTime(dateStr)) return ''
+  const timePart = dateStr.includes('T') ? dateStr.split('T')[1] : dateStr.split(' ')[1]
+  if (!timePart) return ''
+  const parts = timePart.split(':')
+  if (parts.length >= 2) {
+    const hh = parts[0].padStart(2, '0')
+    const mm = parts[1].slice(0, 2).padStart(2, '0')
+    return `${hh}:${mm}`
+  }
+  return ''
+}
+
+/**
+ * Combine une date (YYYY-MM-DD) et une heure optionnelle (HH:mm) en format compatible SQL/Supabase.
+ */
+export function combineDateAndTime(dateStr: string, timeStr?: string | null): string {
+  if (!dateStr) return ''
+  const baseDate = dateStr.split('T')[0]
+  if (!timeStr || !timeStr.trim()) {
+    return baseDate
+  }
+  const cleanTime = timeStr.trim()
+  return `${baseDate}T${cleanTime.length === 5 ? cleanTime + ':00' : cleanTime}`
+}
+
+/**
+ * Formate une heure au format convivial français (ex: 14h30 ou 09h00).
+ */
+export function formatTimeDisplay(timeStrOrDate: string | Date): string {
+  if (typeof timeStrOrDate === 'string' && timeStrOrDate.includes(':') && !timeStrOrDate.includes('-') && !timeStrOrDate.includes('T')) {
+    const [h, m] = timeStrOrDate.split(':')
+    return `${parseInt(h, 10)}h${m || '00'}`
+  }
+  const d = new Date(timeStrOrDate)
+  if (isNaN(d.getTime())) return ''
+  const hours = String(d.getHours()).padStart(2, '0')
+  const minutes = String(d.getMinutes()).padStart(2, '0')
+  return `${hours}h${minutes}`
+}
+
+/**
+ * Formate un événement pour afficher sa date et éventuellement son heure si renseignée.
+ */
+export function formatEventDateTime(dateStr: string, endDateStr?: string | null): string {
+  if (!dateStr) return ''
+  const dateFormatted = formatDate(dateStr)
+  const time = extractTimeFromDate(dateStr)
+  if (time) {
+    const [h, m] = time.split(':')
+    const timeFormatted = `${parseInt(h, 10)}h${m}`
+    const endTime = extractTimeFromDate(endDateStr)
+    if (endTime && endDateStr?.split('T')[0] === dateStr.split('T')[0]) {
+      const [endH, endM] = endTime.split(':')
+      return `${dateFormatted} de ${timeFormatted} à ${parseInt(endH, 10)}h${endM}`
+    }
+    return `${dateFormatted} à ${timeFormatted}`
+  }
+  return dateFormatted
+}
+
 export const TASK_CATEGORIES = [
   'Sécurité',
   'Réseau',
@@ -48,7 +128,7 @@ export const TASK_PRIORITIES = ['haute', 'moyenne', 'basse'] as const
 
 export const EVENT_TYPES = ['rdv', 'appel', 'échéance', 'étape chantier'] as const
 
-export const EVENT_STATUSES = ['passé', 'à venir', 'en attente'] as const
+export const EVENT_STATUSES = ['à venir', 'en attente', 'clos', 'passé'] as const
 
 export const PRIORITY_COLORS: Record<string, string> = {
   haute: 'bg-red-100 text-red-800 border-red-200',

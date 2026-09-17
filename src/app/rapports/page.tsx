@@ -24,7 +24,11 @@ import {
   Shield, 
   TrendingUp, 
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  MessageSquareText,
+  Flag,
+  Phone,
+  Users
 } from 'lucide-react'
 import { 
   Task, 
@@ -39,8 +43,10 @@ import {
   STATUS_COLORS, 
   PROJECT_STATUS_COLORS, 
   TASK_CATEGORIES,
-  TASK_CATEGORY_COLORS 
+  TASK_CATEGORY_COLORS,
+  EVENT_TYPE_LABELS
 } from '@/lib/utils'
+import { parseEventClosureComment } from '@/lib/closure-comments'
 
 // Helper to format ISO date to YYYY-MM-DD
 function toYMD(d: Date): string {
@@ -171,6 +177,21 @@ export default function RapportsPage() {
     return desc.includes(`[chantier_id:${p.id}]`) || desc.includes(pShort) || title.includes(pShort)
   }
 
+  // Helper to get project for event
+  const getProjectForEvent = (event: CalendarEvent): Project | undefined => {
+    const desc = (event.description || '').toLowerCase()
+    const title = (event.title || '').toLowerCase()
+
+    return projects.find(p => {
+      if (desc.includes(`[chantier_id:${p.id}]`)) return true
+      if (desc.includes(`chantier #${p.priority_order}`)) return true
+      if (title.includes(`chantier #${p.priority_order}`)) return true
+      const pShort = p.name.toLowerCase().slice(0, 15)
+      if (desc.includes(pShort) || title.includes(pShort)) return true
+      return false
+    })
+  }
+
   // 1. Completed tasks in selected period
   const completedTasksInPeriod = useMemo(() => {
     return tasks.filter(t => {
@@ -182,6 +203,14 @@ export default function RapportsPage() {
     })
   }, [tasks, startDate, endDate, selectedCategory])
 
+  // 2. Closed events & milestones in selected period
+  const closedEventsInPeriod = useMemo(() => {
+    return events.filter(e => {
+      if (e.status !== 'clos') return false
+      return isDateInRange(e.event_date)
+    })
+  }, [events, startDate, endDate])
+
   // Breakdown by category
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -191,7 +220,7 @@ export default function RapportsPage() {
     return counts
   }, [completedTasksInPeriod])
 
-  // 2. Chantiers stats and progress
+  // 3. Chantiers stats and progress
   const chantiersReport = useMemo(() => {
     return projects.map(p => {
       const pId = p.id
@@ -252,15 +281,17 @@ export default function RapportsPage() {
     const totalAllTasks = tasks.length
     const totalAllDoneTasks = tasks.filter(t => t.status === 'fait').length
     const globalCompletionRate = totalAllTasks > 0 ? Math.round((totalAllDoneTasks / totalAllTasks) * 100) : 0
+    const closedEventsCount = closedEventsInPeriod.length
 
     return {
       totalDone,
       highPriorityDone,
       activeProjects,
       finishedProjects,
-      globalCompletionRate
+      globalCompletionRate,
+      closedEventsCount
     }
-  }, [completedTasksInPeriod, projects, tasks])
+  }, [completedTasksInPeriod, projects, tasks, closedEventsInPeriod])
 
   // Clean description helper for tasks
   const formatTaskDesc = (desc: string | null) => {
@@ -268,6 +299,7 @@ export default function RapportsPage() {
     return desc
       .replace(/\[chantier_id:[^\]]+\]/g, '')
       .replace(/\[Période flexible\s*:\s*[^\]]+\]/g, '')
+      .replace(/\[(?:CLOTURE|CLÔTURE|RESOLUTION|RÉSOLUTION)\s*:\s*[^\]]+\]/gi, '')
       .trim()
   }
 
@@ -291,6 +323,7 @@ export default function RapportsPage() {
     md += `## 1. SYNTHÈSE EXÉCUTIVE\n\n`
     md += `- **Tâches accomplies sur la période :** ${kpis.totalDone}\n`
     md += `- **Tâches critiques / haute priorité traitées :** ${kpis.highPriorityDone}\n`
+    md += `- **Événements & Jalons clos/réglés sur la période :** ${kpis.closedEventsCount}\n`
     md += `- **Chantiers en cours :** ${kpis.activeProjects}\n`
     md += `- **Chantiers terminés :** ${kpis.finishedProjects}\n`
     md += `- **Taux de réalisation global du parc IT/Projets :** ${kpis.globalCompletionRate}%\n\n`
@@ -310,7 +343,24 @@ export default function RapportsPage() {
       md += `\n`
     }
 
-    md += `## 3. AVANCEMENT DES CHANTIERS & CAHIER DES CHARGES\n\n`
+    md += `## 3. ÉVÉNEMENTS & JALONS CLOS SUR LA PÉRIODE (${closedEventsInPeriod.length})\n\n`
+    if (closedEventsInPeriod.length === 0) {
+      md += `*Aucun événement ou jalon marqué comme clos sur cette période.*\n\n`
+    } else {
+      md += `| Date | Type | Événement | Chantier / Contexte | Motif de clôture & Résolution |\n`
+      md += `| :--- | :--- | :--- | :--- | :--- |\n`
+      closedEventsInPeriod.forEach(e => {
+        const d = formatDate(e.event_date)
+        const p = getProjectForEvent(e)
+        const pName = p ? `#${p.priority_order} ${p.name}` : 'Général / Transversal'
+        const closure = parseEventClosureComment(e.description)
+        const comment = closure.closureComment || 'Clos sans commentaire particulier'
+        md += `| ${d} | ${EVENT_TYPE_LABELS[e.event_type] || e.event_type} | ${e.title} | ${pName} | ${comment} |\n`
+      })
+      md += `\n`
+    }
+
+    md += `## 4. AVANCEMENT DES CHANTIERS & CAHIER DES CHARGES\n\n`
     chantiersReport.forEach(({ project, totalTasks, doneTasks, progressPercent, tasksCompletedInPeriod, projectEventsInPeriod }) => {
       md += `### Chantier #${project.priority_order} : ${project.name}\n`
       md += `- **Statut actuel :** ${project.status}\n`
@@ -334,7 +384,12 @@ export default function RapportsPage() {
       if (projectEventsInPeriod.length > 0) {
         md += `- **Jalons / Événements de la période :**\n`
         projectEventsInPeriod.forEach(e => {
-          md += `  - ${formatDate(e.event_date)} : ${e.title} (${e.event_type})\n`
+          const closure = parseEventClosureComment(e.description)
+          if (e.status === 'clos') {
+            md += `  - [x] ${formatDate(e.event_date)} : ${e.title} (${e.event_type}) — **Clos**${closure.closureComment ? ` (Résolution : ${closure.closureComment})` : ''}\n`
+          } else {
+            md += `  - [ ] ${formatDate(e.event_date)} : ${e.title} (${e.event_type})\n`
+          }
         })
       }
       md += `\n`
@@ -521,9 +576,9 @@ export default function RapportsPage() {
       </Card>
 
       {/* Executive KPI Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 print:grid-cols-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 print:grid-cols-5">
         <Card className="border-l-4 border-l-green-500 bg-white shadow-xs">
-          <CardContent className="p-4 sm:p-5">
+          <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Tâches terminées
@@ -533,7 +588,7 @@ export default function RapportsPage() {
               </div>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl sm:text-3xl font-bold text-slate-900">
+              <span className="text-2xl font-bold text-slate-900">
                 {kpis.totalDone}
               </span>
               <span className="text-xs text-slate-500 font-medium">sur la période</span>
@@ -541,8 +596,27 @@ export default function RapportsPage() {
           </CardContent>
         </Card>
 
+        <Card className="border-l-4 border-l-emerald-500 bg-white shadow-xs">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-emerald-600 uppercase tracking-wider">
+                Événements clos
+              </span>
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-emerald-700">
+                {kpis.closedEventsCount}
+              </span>
+              <span className="text-xs text-slate-500 font-medium">réglés/archivés</span>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="border-l-4 border-l-red-500 bg-white shadow-xs">
-          <CardContent className="p-4 sm:p-5">
+          <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Priorités hautes
@@ -552,16 +626,16 @@ export default function RapportsPage() {
               </div>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl sm:text-3xl font-bold text-slate-900">
+              <span className="text-2xl font-bold text-slate-900">
                 {kpis.highPriorityDone}
               </span>
-              <span className="text-xs text-slate-500 font-medium">tâches urgentes</span>
+              <span className="text-xs text-slate-500 font-medium">urgentes</span>
             </div>
           </CardContent>
         </Card>
 
         <Card className="border-l-4 border-l-blue-500 bg-white shadow-xs">
-          <CardContent className="p-4 sm:p-5">
+          <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Chantiers en cours
@@ -571,7 +645,7 @@ export default function RapportsPage() {
               </div>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl sm:text-3xl font-bold text-slate-900">
+              <span className="text-2xl font-bold text-slate-900">
                 {kpis.activeProjects}
               </span>
               <span className="text-xs text-slate-500 font-medium">
@@ -582,7 +656,7 @@ export default function RapportsPage() {
         </Card>
 
         <Card className="border-l-4 border-l-indigo-500 bg-white shadow-xs">
-          <CardContent className="p-4 sm:p-5">
+          <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                 Avancement global
@@ -592,7 +666,7 @@ export default function RapportsPage() {
               </div>
             </div>
             <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl sm:text-3xl font-bold text-slate-900">
+              <span className="text-2xl font-bold text-slate-900">
                 {kpis.globalCompletionRate}%
               </span>
               <span className="text-xs text-slate-500 font-medium">toutes tâches</span>
@@ -714,11 +788,99 @@ export default function RapportsPage() {
         )}
       </section>
 
-      {/* SECTION 2: AVANCEMENT DES CHANTIERS */}
+      {/* SECTION 2: ÉVÉNEMENTS & JALONS CLOS */}
+      <section className="space-y-4 print-break-inside-avoid">
+        <div className="flex items-center gap-2.5 border-b border-slate-200 pb-3">
+          <div className="w-7 h-7 rounded-md bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
+            2
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">
+              Événements & Jalons clos sur la période
+            </h2>
+            <p className="text-xs text-slate-500">
+              Interventions, réunions et échéances finalisées ou réglées avec leur motif de clôture ({closedEventsInPeriod.length} événement{closedEventsInPeriod.length > 1 ? 's' : ''})
+            </p>
+          </div>
+        </div>
+
+        {closedEventsInPeriod.length === 0 ? (
+          <Card className="bg-slate-50/50 border-dashed border-slate-300">
+            <CardContent className="p-6 text-center text-slate-500">
+              <CheckCircle2 className="w-8 h-8 text-slate-300 mx-auto mb-1.5" />
+              <p className="font-semibold text-xs text-slate-700">Aucun événement clos sur cette période</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {closedEventsInPeriod.map(ev => {
+              const project = getProjectForEvent(ev)
+              const closure = parseEventClosureComment(ev.description)
+              const eventDate = formatDate(ev.event_date)
+
+              return (
+                <div
+                  key={ev.id}
+                  className="bg-white rounded-xl border border-emerald-200 p-3.5 shadow-2xs space-y-2 border-l-4 border-l-emerald-600 print-break-inside-avoid"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                        <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-300 font-bold">
+                          ✓ Clos
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px] bg-slate-50 text-slate-700 border-slate-200 capitalize">
+                          {EVENT_TYPE_LABELS[ev.event_type] || ev.event_type}
+                        </Badge>
+                        {project && (
+                          <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200 font-semibold">
+                            Chantier #{project.priority_order}
+                          </Badge>
+                        )}
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {eventDate}
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-xs text-slate-900 truncate">
+                        {ev.title}
+                      </h4>
+                    </div>
+                  </div>
+
+                  {closure.cleanDesc && (
+                    <p className="text-[11px] text-slate-500 line-clamp-2">
+                      {closure.cleanDesc}
+                    </p>
+                  )}
+
+                  {/* Motif de clôture & résolution */}
+                  {closure.closureComment ? (
+                    <div className="p-2 rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-950 text-xs">
+                      <div className="font-semibold text-emerald-800 flex items-center gap-1 mb-0.5 text-[11px]">
+                        <MessageSquareText className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>Motif de clôture & Résolution :</span>
+                      </div>
+                      <p className="text-[11px] text-emerald-900 whitespace-pre-wrap">
+                        {closure.closureComment}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-[10px] text-slate-400 italic">
+                      Clôturé sans commentaire spécifique.
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* SECTION 3: AVANCEMENT DES CHANTIERS */}
       <section className="space-y-4 print-break-inside-avoid">
         <div className="flex items-center gap-2.5 border-b border-slate-200 pb-3">
           <div className="w-7 h-7 rounded-md bg-blue-600 text-white flex items-center justify-center font-bold text-sm">
-            2
+            3
           </div>
           <div>
             <h2 className="text-lg font-bold text-slate-900">

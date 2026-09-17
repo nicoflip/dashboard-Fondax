@@ -12,15 +12,17 @@ import {
   TASK_PRIORITIES,
   cn
 } from '@/lib/utils'
-import { Task, CalendarEvent, TaskCategory, TaskPriority, TaskStatus, BlockerConfig, EventType, WaitingReturn } from '@/lib/types'
+import { Task, CalendarEvent, TaskCategory, TaskPriority, TaskStatus, BlockerConfig, EventType, WaitingReturn, Project } from '@/lib/types'
 import { parseTaskBlocker } from '@/lib/blockers'
 import { extractWaitingReturnId, formatTaskWithWaitingReturn } from '@/lib/waiting-returns'
+import { extractTaskProjectId } from '@/lib/projects'
 import { TaskBlockerSelector } from './TaskBlockerSelector'
 import { CustomDatePicker } from '@/components/ui/date-picker'
 import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
 import { WaitingReturnSelector } from '@/components/ui/WaitingReturnSelector'
+import { ProjectSelector } from '@/components/ui/ProjectSelector'
 import { Badge } from '@/components/ui/badge'
-import { Hourglass, Calendar as CalendarIcon, User, Plus, Clock } from 'lucide-react'
+import { Hourglass, Calendar as CalendarIcon, User, Plus, Clock, FolderKanban } from 'lucide-react'
 
 export interface TaskFormData {
   title: string
@@ -30,8 +32,10 @@ export interface TaskFormData {
   status: TaskStatus
   blocker: BlockerConfig
   waitingReturnId?: string | null
+  projectId?: string | null
   createAlsoEvent?: boolean
   eventDate?: string
+  eventTime?: string
   eventEndDate?: string
   eventIsFlexible?: boolean
   eventFlexLabel?: string
@@ -45,6 +49,7 @@ interface TaskFormDialogProps {
   tasks: Task[]
   events: CalendarEvent[]
   waitingReturns?: WaitingReturn[]
+  projects?: Project[]
   onSave: (data: TaskFormData) => Promise<void>
   onCreateReturnInline?: (title: string, waiting_on: string) => Promise<WaitingReturn | null>
 }
@@ -64,8 +69,10 @@ const DEFAULT_FORM_DATA: TaskFormData = {
     prereqReturnId: ''
   },
   waitingReturnId: null,
+  projectId: null,
   createAlsoEvent: false,
   eventDate: new Date().toISOString().split('T')[0],
+  eventTime: '',
   eventEndDate: '',
   eventIsFlexible: false,
   eventFlexLabel: 'Dans les 2 prochaines semaines',
@@ -79,6 +86,7 @@ export function TaskFormDialog({
   tasks,
   events,
   waitingReturns = [],
+  projects = [],
   onSave,
   onCreateReturnInline
 }: TaskFormDialogProps) {
@@ -96,6 +104,7 @@ export function TaskFormDialog({
       if (editingTask) {
         const blocker = parseTaskBlocker(editingTask.description)
         const returnId = extractWaitingReturnId(editingTask.description)
+        const projId = extractTaskProjectId(editingTask.description)
 
         setFormData({
           title: editingTask.title,
@@ -112,8 +121,10 @@ export function TaskFormDialog({
             prereqReturnId: blocker.prereqReturnId || ''
           },
           waitingReturnId: returnId,
+          projectId: projId,
           createAlsoEvent: false,
           eventDate: new Date().toISOString().split('T')[0],
+          eventTime: '',
           eventEndDate: '',
           eventIsFlexible: false,
           eventFlexLabel: 'Dans les 2 prochaines semaines',
@@ -269,7 +280,15 @@ export function TaskFormDialog({
           </div>
         )}
 
-        {/* Option : Créer l'événement éponyme au calendrier */}
+        {/* Rattachement à un chantier IT */}
+        <ProjectSelector
+          projects={projects}
+          value={formData.projectId || null}
+          onChange={pId => setFormData({ ...formData, projectId: pId })}
+          label="Rattacher à un chantier IT (optionnel)"
+          placeholder="Sélectionner un chantier IT..."
+        />
+
         {/* Option : Créer l'événement éponyme au calendrier avec choix fixe / flexible */}
         {!editingTask && (
           <CalendarSyncOptions
@@ -279,6 +298,8 @@ export function TaskFormDialog({
             onFlexibleChange={val => setFormData({ ...formData, eventIsFlexible: val })}
             date={formData.eventDate || new Date().toISOString().split('T')[0]}
             onDateChange={d => setFormData({ ...formData, eventDate: d })}
+            time={formData.eventTime || ''}
+            onTimeChange={t => setFormData({ ...formData, eventTime: t })}
             endDate={formData.eventEndDate || ''}
             onEndDateChange={d => setFormData({ ...formData, eventEndDate: d })}
             flexLabel={formData.eventFlexLabel || 'Dans les 2 prochaines semaines'}

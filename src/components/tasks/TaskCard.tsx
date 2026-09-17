@@ -13,10 +13,11 @@ import {
   TASK_CATEGORY_COLORS, 
   formatDate 
 } from '@/lib/utils'
-import { Task, CalendarEvent, TaskStatus, WaitingReturn } from '@/lib/types'
+import { Task, CalendarEvent, TaskStatus, WaitingReturn, Project } from '@/lib/types'
 import { checkTaskBlocked } from '@/lib/blockers'
 import { extractWaitingReturnId, getWaitingReturnMetrics } from '@/lib/waiting-returns'
 import { getTaskWaitingDetails } from '@/lib/waiting'
+import { extractTaskProjectId, cleanTaskDescriptionProject, isTaskInProject } from '@/lib/projects'
 import { 
   Trash2, 
   CheckCircle2, 
@@ -28,7 +29,8 @@ import {
   Check, 
   Lock, 
   Unlock,
-  User
+  User,
+  FolderKanban
 } from 'lucide-react'
 
 interface TaskCardProps {
@@ -36,6 +38,7 @@ interface TaskCardProps {
   allTasks: Task[]
   allEvents: CalendarEvent[]
   waitingReturns?: WaitingReturn[]
+  allProjects?: Project[]
   onEdit: (task: Task) => void
   onDelete: (taskId: string) => void
   onSchedule: (task: Task) => void
@@ -48,6 +51,7 @@ export function TaskCard({
   allTasks,
   allEvents,
   waitingReturns = [],
+  allProjects = [],
   onEdit,
   onDelete,
   onSchedule,
@@ -64,6 +68,10 @@ export function TaskCard({
   const waitingReturnId = extractWaitingReturnId(task.description)
   const associatedReturn = waitingReturns.find(r => r.id === waitingReturnId) || null
   const returnMetrics = associatedReturn ? getWaitingReturnMetrics(associatedReturn) : null
+
+  // Trouver le chantier associé à cette tâche (s'il existe)
+  const taskProjectId = extractTaskProjectId(task.description)
+  const associatedProject = allProjects.find(p => p.id === taskProjectId || isTaskInProject(task, p)) || null
 
   // Métriques de secours
   const { info: waitingInfo, metrics: fallbackWaitingMetrics } = getTaskWaitingDetails(task)
@@ -348,26 +356,37 @@ export function TaskCard({
         )}
 
         <CardDescription className="line-clamp-2 mt-2">
-          {(isAttente ? waitingInfo.cleanDescription : blocker.cleanDescription) ? (
-            isBlocked ? (
-              <span className="text-slate-500 italic">{blocker.cleanDescription}</span>
-            ) : isAttente ? (
-              <span className="text-amber-900 font-medium">{waitingInfo.cleanDescription}</span> 
-            ) : isUrgent ? (
-              <span className="text-slate-800 font-medium">{blocker.cleanDescription}</span>
-            ) : isFait ? (
-              <span className="text-slate-400 italic">{blocker.cleanDescription}</span>
-            ) : (
-              blocker.cleanDescription
-            )
-          ) : (
-            <span className="italic text-slate-400">Aucune description</span>
-          )}
+          {(() => {
+            const raw = isAttente ? waitingInfo.cleanDescription : blocker.cleanDescription
+            const cleaned = cleanTaskDescriptionProject(raw)
+            if (!cleaned) return <span className="italic text-slate-400">Aucune description</span>
+            if (isBlocked) return <span className="text-slate-500 italic">{cleaned}</span>
+            if (isAttente) return <span className="text-amber-900 font-medium">{cleaned}</span>
+            if (isUrgent) return <span className="text-slate-800 font-medium">{cleaned}</span>
+            if (isFait) return <span className="text-slate-400 italic">{cleaned}</span>
+            return cleaned
+          })()}
         </CardDescription>
       </CardHeader>
 
       <CardContent className="mt-auto pb-4 space-y-3">
         <div className="flex flex-wrap items-center gap-2">
+          {associatedProject && (
+            <Badge 
+              variant="outline" 
+              className={cn(
+                "text-xs font-semibold border bg-amber-50/90 text-amber-900 border-amber-300 flex items-center gap-1",
+                isFait && "opacity-60"
+              )}
+              title={`Rattachée au chantier #${associatedProject.priority_order} : ${associatedProject.name}`}
+            >
+              <FolderKanban className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span className="truncate max-w-[170px]">
+                Chantier #{associatedProject.priority_order} : {associatedProject.name}
+              </span>
+            </Badge>
+          )}
+
           <Badge 
             variant="outline" 
             className={cn(

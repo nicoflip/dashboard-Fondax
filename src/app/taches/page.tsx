@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Task, CalendarEvent, TaskStatus, WaitingReturn } from '@/lib/types'
+import { Task, CalendarEvent, TaskStatus, WaitingReturn, Project } from '@/lib/types'
 import { 
   formatTaskDescriptionWithBlocker, 
   checkTaskBlocked, 
@@ -17,8 +17,14 @@ import {
   formatTaskWithWaitingReturn, 
   extractWaitingReturnId 
 } from '@/lib/waiting-returns'
+import { 
+  formatTaskDescriptionWithProject, 
+  isTaskLinkedToChantier, 
+  getTaskProject 
+} from '@/lib/projects'
+import { combineDateAndTime } from '@/lib/utils'
 import { TaskCard } from '@/components/tasks/TaskCard'
-import { TaskFilters, TaskTab } from '@/components/tasks/TaskFilters'
+import { TaskFilters, TaskTab, ChantierFilterMode } from '@/components/tasks/TaskFilters'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
 import { TaskScheduleDialog, ScheduleEventData } from '@/components/tasks/TaskScheduleDialog'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
@@ -41,6 +47,7 @@ function TasksContent() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [waitingReturns, setWaitingReturns] = useState<WaitingReturn[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
 
   // Filters state
@@ -48,6 +55,8 @@ function TasksContent() {
   const [filterCat, setFilterCat] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterPriority, setFilterPriority] = useState('all')
+  const [filterChantierMode, setFilterChantierMode] = useState<ChantierFilterMode>('all')
+  const [filterProject, setFilterProject] = useState('all')
   const [hideBlocked, setHideBlocked] = useState(false)
 
   // Modals state
@@ -72,14 +81,16 @@ function TasksContent() {
   // Fetch initial tasks, events and waiting returns
   const fetchTasks = async () => {
     setLoading(true)
-    const [tasksRes, eventsRes, returnsRes] = await Promise.all([
+    const [tasksRes, eventsRes, returnsRes, projectsRes] = await Promise.all([
       supabase.from('tasks').select('*').order('created_at', { ascending: false }),
       supabase.from('events').select('*').order('event_date', { ascending: true }),
-      fetchWaitingReturns(supabase)
+      fetchWaitingReturns(supabase),
+      supabase.from('projects').select('*').order('priority_order', { ascending: true })
     ])
     if (tasksRes.data) setTasks(tasksRes.data)
     if (eventsRes.data) setEvents(eventsRes.data as CalendarEvent[])
     if (returnsRes) setWaitingReturns(returnsRes)
+    if (projectsRes.data) setProjects(projectsRes.data as Project[])
     setLoading(false)
   }
 
@@ -301,6 +312,9 @@ function TasksContent() {
       finalDescription = removeWaitingTag(finalDescription)
     }
 
+    // Rattachement au chantier IT sélectionné
+    finalDescription = formatTaskDescriptionWithProject(finalDescription, formData.projectId || null)
+
     if (editingTask) {
       const wasFait = editingTask.status === 'fait'
       const isNowFait = formData.status === 'fait'
@@ -344,11 +358,12 @@ function TasksContent() {
         setIsFormOpen(false)
 
         if (formData.createAlsoEvent) {
-          const eventDate = formData.eventDate || new Date().toISOString().split('T')[0]
+          const baseEventDate = formData.eventDate || new Date().toISOString().split('T')[0]
+          const eventDate = combineDateAndTime(baseEventDate, formData.eventTime)
           const eventType = formData.eventType || 'échéance'
-          let finalEndDate = formData.eventEndDate || null
+          let finalEndDate = formData.eventEndDate ? combineDateAndTime(formData.eventEndDate, formData.eventTime) : null
           if (formData.eventIsFlexible && !finalEndDate) {
-            const d = new Date(eventDate + 'T00:00:00')
+            const d = new Date(baseEventDate + 'T00:00:00')
             d.setDate(d.getDate() + 14)
             finalEndDate = d.toISOString().split('T')[0]
           }
@@ -363,7 +378,7 @@ function TasksContent() {
               title: formData.title.trim(),
               description: finalDesc,
               event_date: eventDate,
-              end_date: formData.eventIsFlexible ? finalEndDate : null,
+              end_date: formData.eventIsFlexible ? finalEndDate : (finalEndDate || null),
               event_type: eventType,
               status: 'à venir',
               task_id: data.id,
@@ -418,15 +433,17 @@ function TasksContent() {
     }).length
   }, [waitingTasks])
 
-  // Counts for filter tabs
+  // Counts for filter tabs and chantier isolation
   const tabCounts = useMemo(() => ({
     urgentes: tasks.filter(t => t.priority === 'haute' && t.status !== 'fait').length,
     aTraiter: tasks.filter(t => ['à faire', 'en cours'].includes(t.status)).length,
     enAttente: waitingTasks.length,
     waitingDueCount,
     terminees: tasks.filter(t => t.status === 'fait').length,
-    toutes: tasks.length
-  }), [tasks, waitingTasks, waitingDueCount])
+    toutes: tasks.length,
+    withChantier: tasks.filter(t => isTaskLinkedToChantier(t, projects)).length,
+    withoutChantier: tasks.filter(t => !isTaskLinkedToChantier(t, projects)).length
+  }), [tasks, waitingTasks, waitingDueCount, projects])
 
   // Filtered & sorted tasks
   const filteredTasks = useMemo(() => {
@@ -436,6 +453,19 @@ function TasksContent() {
       if (activeTab === 'a-traiter' && !['à faire', 'en cours'].includes(task.status)) return false
       if (activeTab === 'en-attente' && task.status !== 'en attente de retour externe') return false
       if (activeTab === 'terminees' && task.status !== 'fait') return false
+
+      // Chantier Isolation Filter
+      if (filterChantierMode === 'with_chantier') {
+        if (!isTaskLinkedToChantier(task, projects)) return false
+      } else if (filterChantierMode === 'without_chantier') {
+        if (isTaskLinkedToChantier(task, projects)) return false
+      }
+
+      // Specific Project Filter
+      if (filterProject !== 'all') {
+        const p = getTaskProject(task, projects)
+        if (!p || p.id !== filterProject) return false
+      }
 
       // Dropdown filters
       if (filterCat !== 'all' && task.category !== filterCat) return false
@@ -452,7 +482,7 @@ function TasksContent() {
     })
 
     return sortTasksWithBlockers(filtered, events, waitingReturns)
-  }, [tasks, events, waitingReturns, activeTab, filterCat, filterStatus, filterPriority, hideBlocked])
+  }, [tasks, events, waitingReturns, projects, activeTab, filterChantierMode, filterProject, filterCat, filterStatus, filterPriority, hideBlocked])
 
   const activeTasks = useMemo(() => filteredTasks.filter(t => t.status !== 'fait'), [filteredTasks])
   const doneTasks = useMemo(() => filteredTasks.filter(t => t.status === 'fait'), [filteredTasks])
@@ -502,6 +532,11 @@ function TasksContent() {
         onFilterStatusChange={setFilterStatus}
         filterPriority={filterPriority}
         onFilterPriorityChange={setFilterPriority}
+        filterChantierMode={filterChantierMode}
+        onFilterChantierModeChange={setFilterChantierMode}
+        filterProject={filterProject}
+        onFilterProjectChange={setFilterProject}
+        projects={projects}
         hideBlocked={hideBlocked}
         onToggleHideBlocked={() => setHideBlocked(h => !h)}
         blockedCount={blockedCount}
@@ -584,6 +619,7 @@ function TasksContent() {
                       allTasks={tasks}
                       allEvents={events}
                       waitingReturns={waitingReturns}
+                      allProjects={projects}
                       onEdit={(t) => {
                         setEditingTask(t)
                         setIsFormOpen(true)
@@ -627,6 +663,7 @@ function TasksContent() {
                     allTasks={tasks}
                     allEvents={events}
                     waitingReturns={waitingReturns}
+                    allProjects={projects}
                     onEdit={(t) => {
                       setEditingTask(t)
                       setIsFormOpen(true)
@@ -660,6 +697,7 @@ function TasksContent() {
         tasks={tasks}
         events={events}
         waitingReturns={waitingReturns}
+        projects={projects}
         onCreateReturnInline={async (title, waiting_on) => {
           const created = await createWaitingReturn(supabase, {
             title,

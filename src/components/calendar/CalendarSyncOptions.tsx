@@ -60,6 +60,8 @@ export interface CalendarSyncOptionsProps {
   onFlexibleChange: (isFlexible: boolean) => void
   date: string
   onDateChange: (date: string) => void
+  time?: string
+  onTimeChange?: (time: string) => void
   endDate?: string
   onEndDateChange?: (endDate: string) => void
   flexLabel: string
@@ -80,6 +82,8 @@ export function CalendarSyncOptions({
   onFlexibleChange,
   date,
   onDateChange,
+  time = '',
+  onTimeChange,
   endDate = '',
   onEndDateChange,
   flexLabel,
@@ -246,17 +250,45 @@ export function CalendarSyncOptions({
           {/* Configuration selon le mode */}
           {!isFlexible ? (
             /* MODE 1 : DATE FIXE */
-            <div className="space-y-2 bg-white p-2.5 rounded-lg border border-purple-100">
-              <div className="space-y-1">
-                <Label className="text-[11px] font-semibold text-slate-700">
-                  Date de l&apos;événement au calendrier
-                </Label>
-                <CustomDatePicker
-                  value={date}
-                  onChange={onDateChange}
-                  placeholder="Sélectionner la date au calendrier"
-                  className="h-9 text-xs bg-white"
-                />
+            <div className="space-y-2.5 bg-white p-2.5 rounded-lg border border-purple-100">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="space-y-1">
+                  <Label className="text-[11px] font-semibold text-slate-700">
+                    Date de l&apos;événement
+                  </Label>
+                  <CustomDatePicker
+                    value={date}
+                    onChange={onDateChange}
+                    placeholder="Sélectionner la date"
+                    className="h-9 text-xs bg-white"
+                  />
+                </div>
+
+                {onTimeChange && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-purple-600" />
+                        Heure (optionnel)
+                      </Label>
+                      {time && (
+                        <button
+                          type="button"
+                          onClick={() => onTimeChange('')}
+                          className="text-[10px] text-slate-400 hover:text-red-600 cursor-pointer"
+                        >
+                          Effacer
+                        </button>
+                      )}
+                    </div>
+                    <Input
+                      type="time"
+                      value={time}
+                      onChange={e => onTimeChange(e.target.value)}
+                      className="h-9 text-xs bg-white"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Raccourcis date fixe */}
