@@ -9,6 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Task, Project, EventType } from '@/lib/types'
 import { createWaitingReturn } from '@/lib/waiting-returns'
+import { extractTaskProjectId } from '@/lib/projects'
+import { TaskFormData } from './TaskFormDialog'
 import { CheckCircle2, Calendar, FolderKanban, PlusCircle, ArrowRight, Clock, Hourglass, CalendarPlus, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { CustomDatePicker } from '@/components/ui/date-picker'
@@ -20,9 +22,10 @@ interface TaskFollowUpDialogProps {
   open: boolean
   onClose: () => void
   onSuccessMessage?: (msg: string) => void
+  onRequestCreateTask?: (prefill: Partial<TaskFormData>) => void
 }
 
-export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: TaskFollowUpDialogProps) {
+export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRequestCreateTask }: TaskFollowUpDialogProps) {
   const supabase = createClient()
   const [selectedAction, setSelectedAction] = useState<'none' | 'calendar' | 'project' | 'next_task' | 'waiting_return'>('none')
   
@@ -305,7 +308,21 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
 
             {/* Option 4 : Tâche suivante */}
             <button
-              onClick={() => setSelectedAction('next_task')}
+              onClick={() => {
+                if (onRequestCreateTask) {
+                  onClose()
+                  onRequestCreateTask({
+                    title: `Suivi / Validation suite à : ${task.title}`,
+                    description: `Vérification de l'adoption et bon fonctionnement.`,
+                    category: task.category,
+                    priority: 'moyenne',
+                    projectId: extractTaskProjectId(task.description) || null,
+                    status: 'à faire'
+                  })
+                } else {
+                  setSelectedAction('next_task')
+                }
+              }}
               className="flex items-start gap-4 p-4 rounded-xl border border-slate-200 bg-white hover:border-purple-400 hover:bg-purple-50/40 text-left transition-all group cursor-pointer"
             >
               <div className="p-2.5 rounded-lg bg-purple-100 text-purple-700 group-hover:bg-purple-600 group-hover:text-white transition-colors shrink-0">
@@ -317,7 +334,7 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage }: Ta
                   <ArrowRight className="w-4 h-4 text-slate-400 group-hover:text-purple-600 transition-transform group-hover:translate-x-1" />
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Enchaîner sur la phase suivante découlant de cette tâche terminée.
+                  Enchaîner sur la phase suivante avec la fiche complète de création (chantier, calendrier, dépendance...).
                 </p>
               </div>
             </button>

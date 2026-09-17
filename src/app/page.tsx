@@ -6,16 +6,22 @@ import { createClient } from '@/lib/supabase/client'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate, formatEventDateTime } from '@/lib/utils'
-import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban, Hourglass } from 'lucide-react'
+import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate, formatEventDateTime, combineDateAndTime } from '@/lib/utils'
+import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban, Hourglass, Plus } from 'lucide-react'
 import { Task, Project, CalendarEvent, WaitingReturn } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
-import { parseFlexibleEvent } from '@/lib/flexible-events'
+import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
+import { parseFlexibleEvent, formatFlexibleEventDescription } from '@/lib/flexible-events'
 import { 
   fetchWaitingReturns, 
   updateWaitingReturn, 
-  getWaitingReturnMetrics 
+  getWaitingReturnMetrics,
+  formatTaskWithWaitingReturn,
+  createWaitingReturn
 } from '@/lib/waiting-returns'
+import { formatTaskDescriptionWithBlocker } from '@/lib/blockers'
+import { formatTaskDescriptionWithProject } from '@/lib/projects'
+import { removeWaitingTag } from '@/lib/waiting'
 
 export default function Dashboard() {
   const supabase = createClient()
@@ -29,71 +35,163 @@ export default function Dashboard() {
     upcomingEvents: 0 
   })
   const [highPriorityTasks, setHighPriorityTasks] = useState<Task[]>([])
+  const [allTasks, setAllTasks] = useState<Task[]>([])
+  const [projectsList, setProjectsList] = useState<Project[]>([])
   const [waitingReturnsList, setWaitingReturnsList] = useState<WaitingReturn[]>([])
   const [upcomingEventsList, setUpcomingEventsList] = useState<CalendarEvent[]>([])
+  const [allEvents, setAllEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
 
   // Smart follow-up modal state
   const [followUpTask, setFollowUpTask] = useState<Task | null>(null)
   const [isFollowUpOpen, setIsFollowUpOpen] = useState(false)
 
+  // Task form modal state
+  const [isTaskFormOpen, setIsTaskFormOpen] = useState(false)
+  const [initialFormData, setInitialFormData] = useState<Partial<TaskFormData> | null>(null)
+  const [notificationMsg, setNotificationMsg] = useState<string | null>(null)
+
+  const showNotification = (msg: string) => {
+    setNotificationMsg(msg)
+    setTimeout(() => {
+      setNotificationMsg(null)
+    }, 4000)
+  }
+
+  const fetchData = async () => {
+    const now = new Date().toISOString()
+    
+    const [
+      openTasksRes,
+      highPriorityCountRes,
+      activeProjectsRes,
+      upcomingEventsRes,
+      topTasksRes,
+      eventsRes,
+      returnsRes,
+      allProjectsRes,
+      allTasksRes,
+      allEventsRes
+    ] = await Promise.all([
+      supabase.from('tasks').select('*', { count: 'exact', head: true }).neq('status', 'fait'),
+      supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('priority', 'haute').neq('status', 'fait'),
+      supabase.from('projects').select('*', { count: 'exact', head: true }).eq('status', 'EN COURS'),
+      supabase.from('events').select('*', { count: 'exact', head: true }).eq('status', 'à venir'),
+      supabase.from('tasks').select('*').eq('priority', 'haute').neq('status', 'fait').order('created_at', { ascending: false }).limit(5),
+      supabase.from('events').select('*').neq('status', 'clos').neq('status', 'passé').gte('event_date', now).order('event_date', { ascending: true }).limit(5),
+      fetchWaitingReturns(supabase),
+      supabase.from('projects').select('*').order('priority_order', { ascending: true }),
+      supabase.from('tasks').select('*').order('created_at', { ascending: false }),
+      supabase.from('events').select('*').order('event_date', { ascending: true })
+    ])
+
+    const activeReturns = (returnsRes || []).filter(r => r.status === 'en attente')
+    const waitingDueCount = activeReturns.filter(r => {
+      const metrics = getWaitingReturnMetrics(r)
+      return metrics.followUpStatus === 'overdue' || metrics.followUpStatus === 'today'
+    }).length
+    const draggingCount = activeReturns.filter(r => {
+      const metrics = getWaitingReturnMetrics(r)
+      return metrics.isDragging
+    }).length
+
+    setStats({
+      openTasks: openTasksRes.count || 0,
+      highPriorityTasks: highPriorityCountRes.count || 0,
+      waitingTasksCount: activeReturns.length,
+      waitingDueCount,
+      draggingCount,
+      activeProjects: activeProjectsRes.count || 0,
+      upcomingEvents: upcomingEventsRes.count || 0
+    })
+
+    if (topTasksRes.data) setHighPriorityTasks(topTasksRes.data)
+    if (allTasksRes.data) setAllTasks(allTasksRes.data)
+    if (allProjectsRes.data) setProjectsList(allProjectsRes.data)
+    setWaitingReturnsList(activeReturns)
+    if (eventsRes.data) setUpcomingEventsList(eventsRes.data)
+    if (allEventsRes.data) setAllEvents(allEventsRes.data as CalendarEvent[])
+    setLoading(false)
+  }
+
   useEffect(() => {
-    async function fetchData() {
-      const now = new Date().toISOString()
-      
-      const [
-        openTasksRes,
-        highPriorityCountRes,
-        activeProjectsRes,
-        upcomingEventsRes,
-        topTasksRes,
-        eventsRes,
-        returnsRes
-      ] = await Promise.all([
-        supabase.from('tasks').select('*', { count: 'exact', head: true }).neq('status', 'fait'),
-        supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('priority', 'haute').neq('status', 'fait'),
-        supabase.from('projects').select('*', { count: 'exact', head: true }).eq('status', 'EN COURS'),
-        supabase.from('events').select('*', { count: 'exact', head: true }).eq('status', 'à venir'),
-        supabase.from('tasks').select('*').eq('priority', 'haute').neq('status', 'fait').order('created_at', { ascending: false }).limit(5),
-        supabase.from('events').select('*').neq('status', 'clos').neq('status', 'passé').gte('event_date', now).order('event_date', { ascending: true }).limit(5),
-        fetchWaitingReturns(supabase)
-      ])
-
-      const activeReturns = (returnsRes || []).filter(r => r.status === 'en attente')
-      const waitingDueCount = activeReturns.filter(r => {
-        const metrics = getWaitingReturnMetrics(r)
-        return metrics.followUpStatus === 'overdue' || metrics.followUpStatus === 'today'
-      }).length
-      const draggingCount = activeReturns.filter(r => {
-        const metrics = getWaitingReturnMetrics(r)
-        return metrics.isDragging
-      }).length
-
-      setStats({
-        openTasks: openTasksRes.count || 0,
-        highPriorityTasks: highPriorityCountRes.count || 0,
-        waitingTasksCount: activeReturns.length,
-        waitingDueCount,
-        draggingCount,
-        activeProjects: activeProjectsRes.count || 0,
-        upcomingEvents: upcomingEventsRes.count || 0
-      })
-
-      if (topTasksRes.data) setHighPriorityTasks(topTasksRes.data)
-      setWaitingReturnsList(activeReturns)
-      if (eventsRes.data) setUpcomingEventsList(eventsRes.data)
-      setLoading(false)
-    }
     fetchData()
   }, [])
+
+  const handleSaveTask = async (formData: TaskFormData) => {
+    let finalDescription = formatTaskDescriptionWithBlocker(
+      formData.description,
+      formData.blocker
+    )
+
+    if (formData.status === 'en attente de retour externe') {
+      if (formData.waitingReturnId) {
+        finalDescription = formatTaskWithWaitingReturn(finalDescription, formData.waitingReturnId)
+      }
+    } else {
+      finalDescription = formatTaskWithWaitingReturn(finalDescription, null)
+      finalDescription = removeWaitingTag(finalDescription)
+    }
+
+    finalDescription = formatTaskDescriptionWithProject(finalDescription, formData.projectId || null)
+
+    const { data, error } = await supabase
+      .from('tasks')
+      .insert([{
+        title: formData.title,
+        description: finalDescription,
+        category: formData.category,
+        priority: formData.priority,
+        status: formData.status
+      }])
+      .select()
+      .single()
+
+    if (data && !error) {
+      setIsTaskFormOpen(false)
+      setInitialFormData(null)
+
+      if (formData.createAlsoEvent) {
+        const baseEventDate = formData.eventDate || new Date().toISOString().split('T')[0]
+        const eventDate = combineDateAndTime(baseEventDate, formData.eventTime)
+        const eventType = formData.eventType || 'échéance'
+        let finalEndDate = formData.eventEndDate ? combineDateAndTime(formData.eventEndDate, formData.eventTime) : null
+        if (formData.eventIsFlexible && !finalEndDate) {
+          const d = new Date(baseEventDate + 'T00:00:00')
+          d.setDate(d.getDate() + 14)
+          finalEndDate = d.toISOString().split('T')[0]
+        }
+        const baseDesc = formData.description.trim() || ''
+        const finalDesc = formData.eventIsFlexible 
+          ? formatFlexibleEventDescription(baseDesc, formData.eventFlexLabel || 'Dans les 2 prochaines semaines')
+          : baseDesc
+
+        await supabase
+          .from('events')
+          .insert([{
+            title: formData.title,
+            description: finalDesc,
+            event_date: eventDate,
+            end_date: formData.eventIsFlexible ? finalEndDate : null,
+            event_type: eventType,
+            status: 'à venir',
+            task_id: data.id,
+            vendor_id: null
+          }])
+      }
+
+      showNotification(`✓ Tâche "${formData.title}" créée avec succès !`)
+      fetchData()
+    }
+  }
 
   const handleMarkReturnReceived = async (returnItem: WaitingReturn) => {
     await updateWaitingReturn(supabase, returnItem.id, { status: 'reçu' })
     
     // Débloquer ou reprendre les tâches qui attendaient ce retour
-    const { data: allTasks } = await supabase.from('tasks').select('*')
-    if (allTasks) {
-      for (const t of allTasks) {
+    const { data: allTasksData } = await supabase.from('tasks').select('*')
+    if (allTasksData) {
+      for (const t of allTasksData) {
         if (t.status === 'en attente de retour externe' && t.description?.includes(`[waiting_return:${returnItem.id}]`)) {
           await supabase.from('tasks').update({
             status: 'en cours',
@@ -132,7 +230,28 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tableau de Bord IT</h1>
+      {/* Header avec action Nouvelle tâche */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tableau de Bord IT</h1>
+        <Button 
+          onClick={() => {
+            setInitialFormData(null)
+            setIsTaskFormOpen(true)
+          }} 
+          className="flex items-center gap-2 cursor-pointer shadow-xs"
+        >
+          <Plus className="h-4 w-4" />
+          Nouvelle tâche
+        </Button>
+      </div>
+
+      {/* Notification banner */}
+      {notificationMsg && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm p-3.5 rounded-xl flex items-center gap-2.5 shadow-xs animate-in fade-in">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+          <span className="font-medium">{notificationMsg}</span>
+        </div>
+      )}
 
       {/* Stats Cards cliquables avec filtrage ciblé */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -467,6 +586,47 @@ export default function Dashboard() {
           setIsFollowUpOpen(false)
           setFollowUpTask(null)
         }}
+        onRequestCreateTask={(prefill) => {
+          setInitialFormData(prefill)
+          setIsTaskFormOpen(true)
+        }}
+        onSuccessMessage={(msg) => {
+          showNotification(msg)
+          fetchData()
+        }}
+      />
+
+      {/* Dialogue de création de tâche complète */}
+      <TaskFormDialog
+        open={isTaskFormOpen}
+        onClose={() => {
+          setIsTaskFormOpen(false)
+          setInitialFormData(null)
+        }}
+        editingTask={null}
+        initialData={initialFormData}
+        onBackToFollowUp={followUpTask ? () => {
+          setIsTaskFormOpen(false)
+          setInitialFormData(null)
+          setIsFollowUpOpen(true)
+        } : undefined}
+        tasks={allTasks}
+        events={allEvents}
+        waitingReturns={waitingReturnsList}
+        projects={projectsList}
+        onCreateReturnInline={async (title, waiting_on) => {
+          const created = await createWaitingReturn(supabase, {
+            title,
+            waiting_on,
+            target_type: 'Prestataire',
+            status: 'en attente'
+          })
+          if (created) {
+            setWaitingReturnsList(prev => [created, ...prev])
+          }
+          return created
+        }}
+        onSave={handleSaveTask}
       />
     </div>
   )

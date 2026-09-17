@@ -46,6 +46,8 @@ interface TaskFormDialogProps {
   open: boolean
   onClose: () => void
   editingTask: Task | null
+  initialData?: Partial<TaskFormData> | null
+  onBackToFollowUp?: () => void
   tasks: Task[]
   events: CalendarEvent[]
   waitingReturns?: WaitingReturn[]
@@ -83,6 +85,8 @@ export function TaskFormDialog({
   open,
   onClose,
   editingTask,
+  initialData,
+  onBackToFollowUp,
   tasks,
   events,
   waitingReturns = [],
@@ -133,11 +137,13 @@ export function TaskFormDialog({
       } else {
         setFormData({
           ...DEFAULT_FORM_DATA,
-          eventDate: new Date().toISOString().split('T')[0]
+          eventDate: new Date().toISOString().split('T')[0],
+          ...(initialData || {}),
+          blocker: initialData?.blocker || DEFAULT_FORM_DATA.blocker
         })
       }
     }
-  }, [open, editingTask])
+  }, [open, editingTask, initialData])
 
   const handleSubmit = async () => {
     if (!formData.title.trim()) return
@@ -152,7 +158,20 @@ export function TaskFormDialog({
   return (
     <Dialog open={open} onClose={onClose}>
       <DialogHeader>
-        <DialogTitle>{editingTask ? 'Modifier la tâche' : 'Nouvelle tâche'}</DialogTitle>
+        <div className="flex items-center justify-between gap-2 pr-6">
+          <DialogTitle>
+            {editingTask ? 'Modifier la tâche' : initialData?.title ? 'Nouvelle tâche de suivi' : 'Nouvelle tâche'}
+          </DialogTitle>
+          {onBackToFollowUp && (
+            <button
+              type="button"
+              onClick={onBackToFollowUp}
+              className="text-xs text-purple-600 hover:text-purple-800 hover:underline flex items-center gap-1 font-medium cursor-pointer"
+            >
+              ← Retour au choix
+            </button>
+          )}
+        </div>
       </DialogHeader>
 
       <div className="space-y-4 py-4 max-h-[75vh] overflow-y-auto pr-1">

@@ -62,6 +62,7 @@ function TasksContent() {
   // Modals state
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [initialFormData, setInitialFormData] = useState<Partial<TaskFormData> | null>(null)
 
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
   const [taskToSchedule, setTaskToSchedule] = useState<Task | null>(null)
@@ -500,6 +501,7 @@ function TasksContent() {
         <Button 
           onClick={() => {
             setEditingTask(null)
+            setInitialFormData(null)
             setIsFormOpen(true)
           }} 
           className="flex items-center gap-2 cursor-pointer"
@@ -692,8 +694,16 @@ function TasksContent() {
         onClose={() => {
           setIsFormOpen(false)
           setEditingTask(null)
+          setInitialFormData(null)
         }}
         editingTask={editingTask}
+        initialData={initialFormData}
+        onBackToFollowUp={followUpTask ? () => {
+          setIsFormOpen(false)
+          setEditingTask(null)
+          setInitialFormData(null)
+          setIsFollowUpOpen(true)
+        } : undefined}
         tasks={tasks}
         events={events}
         waitingReturns={waitingReturns}
@@ -710,7 +720,10 @@ function TasksContent() {
           }
           return created
         }}
-        onSave={handleSaveTask}
+        onSave={async (data) => {
+          await handleSaveTask(data)
+          setInitialFormData(null)
+        }}
       />
 
       <TaskScheduleDialog
@@ -729,6 +742,11 @@ function TasksContent() {
         onClose={() => {
           setIsFollowUpOpen(false)
           setFollowUpTask(null)
+        }}
+        onRequestCreateTask={(prefill) => {
+          setEditingTask(null)
+          setInitialFormData(prefill)
+          setIsFormOpen(true)
         }}
         onSuccessMessage={(msg) => {
           showNotification(msg)
