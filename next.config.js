@@ -10,6 +10,7 @@ const nextConfig = {
       '@fullcalendar/react',
       '@tiptap/react',
       '@tiptap/starter-kit',
+      '@tiptap/extension-placeholder',
       'date-fns',
     ],
   },
