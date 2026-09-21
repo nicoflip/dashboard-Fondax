@@ -2,13 +2,15 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { Project, Task, CalendarEvent, ProjectStatus, TaskPriority, TaskStatus } from '@/lib/types'
+import { Project, Task, CalendarEvent, ProjectStatus, TaskPriority, TaskStatus, WaitingReturn } from '@/lib/types'
 import { isTaskInProject, formatTaskDescriptionWithProject } from '@/lib/projects'
+import { fetchWaitingReturns } from '@/lib/waiting-returns'
 
 export function useChantiers(urlStatus: string | null) {
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [events, setEvents] = useState<CalendarEvent[]>([])
+  const [waitingReturns, setWaitingReturns] = useState<WaitingReturn[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<'TOUS' | 'EN COURS' | 'À FAIRE' | 'TERMINÉ'>('TOUS')
   const supabase = createClient()
@@ -28,14 +30,16 @@ export function useChantiers(urlStatus: string | null) {
 
   const fetchData = async () => {
     setLoading(true)
-    const [projRes, taskRes, eventRes] = await Promise.all([
+    const [projRes, taskRes, eventRes, returnsRes] = await Promise.all([
       supabase.from('projects').select('*').order('priority_order', { ascending: true }),
       supabase.from('tasks').select('*').order('created_at', { ascending: false }),
-      supabase.from('events').select('*').order('event_date', { ascending: true })
+      supabase.from('events').select('*').order('event_date', { ascending: true }),
+      fetchWaitingReturns(supabase)
     ])
     if (projRes.data) setProjects(projRes.data)
     if (taskRes.data) setTasks(taskRes.data)
     if (eventRes.data) setEvents(eventRes.data)
+    if (returnsRes) setWaitingReturns(returnsRes)
     setLoading(false)
   }
 
@@ -84,6 +88,7 @@ export function useChantiers(urlStatus: string | null) {
     projects, setProjects,
     tasks, setTasks,
     events, setEvents,
+    waitingReturns, setWaitingReturns,
     loading,
     statusFilter, setStatusFilter,
     supabase,

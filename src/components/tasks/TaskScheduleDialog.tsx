@@ -88,7 +88,7 @@ export function TaskScheduleDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose}>
+    <Dialog open={open} onClose={onClose} closeOnClickOutside={false}>
       <DialogHeader>
         <div className="flex items-center gap-2 text-blue-600">
           <Calendar className="w-5 h-5" />

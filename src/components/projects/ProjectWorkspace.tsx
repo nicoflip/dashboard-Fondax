@@ -13,7 +13,7 @@ import { PROJECT_STATUS_COLORS, PRIORITY_COLORS, STATUS_COLORS, cn } from '@/lib
 import { isTaskInProject, cleanTaskDescriptionProject } from '@/lib/projects'
 import { 
   X, ListTodo, Calendar, AlertTriangle, Plus, Link2, 
-  CheckSquare, Square, Trash2, FolderMinus 
+  CheckSquare, Square, Trash2, FolderMinus, Pencil 
 } from 'lucide-react'
 
 interface ProjectWorkspaceProps {
@@ -43,6 +43,8 @@ interface ProjectWorkspaceProps {
   handleToggleTaskStatus: (task: Task) => void
   handleDetachTaskFromProject: (task: Task) => void
   handleDeleteTask: (taskId: string) => void
+  onOpenCreateTaskDialog?: () => void
+  onEditTask?: (task: Task) => void
   
   newEventTitle: string
   setNewEventTitle: (val: string) => void
@@ -66,6 +68,7 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
     newTaskTitle, setNewTaskTitle, newTaskPriority, setNewTaskPriority,
     taskToLink, setTaskToLink, handleCreateProjectTask, handleLinkExistingTask,
     handleToggleTaskStatus, handleDetachTaskFromProject, handleDeleteTask,
+    onOpenCreateTaskDialog, onEditTask,
     
     newEventTitle, setNewEventTitle, newEventDate, setNewEventDate,
     newEventType, setNewEventType, handleCreateProjectEvent,
@@ -80,6 +83,7 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
       onClose={() => setActiveWorkspaceProject(null)}
       className="max-w-4xl p-0 overflow-hidden"
       hideCloseButton
+      closeOnClickOutside={false}
     >
       <div className="flex flex-col h-[85vh] max-h-[750px]">
         {/* Modal Header */}
@@ -215,17 +219,33 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
               </div>
 
               {taskAttachMode === 'create' && (
-                <form onSubmit={handleCreateProjectTask} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
-                  <div className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <Plus className="w-3.5 h-3.5 text-blue-600" /> Ajouter une tâche spécifique à ce chantier
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
+                    <div>
+                      <div className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5 text-blue-600" /> Ajouter une tâche pour ce chantier
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Créez une tâche rattachée avec toutes les options : description, catégorie, dépendances, calendrier...
+                      </p>
+                    </div>
+                    {onOpenCreateTaskDialog && (
+                      <Button
+                        type="button"
+                        onClick={onOpenCreateTaskDialog}
+                        className="bg-blue-600 hover:bg-blue-700 text-xs gap-1.5 cursor-pointer shrink-0 font-semibold shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Fiche complète de création
+                      </Button>
+                    )}
                   </div>
-                  <div className="flex gap-2">
+
+                  <form onSubmit={handleCreateProjectTask} className="flex gap-2">
                     <Input
-                      placeholder="Intitulé de la tâche..."
+                      placeholder="Ou saisie rapide : intitulé de la tâche..."
                       value={newTaskTitle}
                       onChange={e => setNewTaskTitle(e.target.value)}
                       className="text-xs flex-1"
-                      required
                     />
                     <select
                       value={newTaskPriority}
@@ -236,11 +256,11 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
                       <option value="moyenne">⚡ Moyenne</option>
                       <option value="basse">☕ Basse</option>
                     </select>
-                    <Button type="submit" size="sm" className="bg-blue-600 hover:bg-blue-700 text-xs shrink-0 cursor-pointer">
-                      Ajouter
+                    <Button type="submit" size="sm" variant="secondary" className="text-xs shrink-0 cursor-pointer">
+                      Ajout rapide
                     </Button>
-                  </div>
-                </form>
+                  </form>
+                </div>
               )}
 
               {taskAttachMode === 'link' && (
@@ -313,6 +333,16 @@ export function ProjectWorkspace(props: ProjectWorkspaceProps) {
                           <Badge className={cn("text-[10px] font-semibold border", STATUS_COLORS[task.status])}>
                             {task.status}
                           </Badge>
+                          {onEditTask && (
+                            <button
+                              type="button"
+                              onClick={() => onEditTask(task)}
+                              className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                              title="Modifier la tâche (fiche complète avec toutes les options)"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleDetachTaskFromProject(task)}

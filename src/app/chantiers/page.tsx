@@ -6,6 +6,16 @@ import { Button } from '@/components/ui/button'
 import { Project, ProjectStatus, Task, TaskPriority, CalendarEvent } from '@/lib/types'
 import { formatTaskDescriptionWithProject } from '@/lib/projects'
 import { FolderKanban, Plus, CheckCircle2 } from 'lucide-react'
+import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
+import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
+import { formatTaskDescriptionWithBlocker } from '@/lib/blockers'
+import { 
+  formatTaskWithWaitingReturn, 
+  createWaitingReturn 
+} from '@/lib/waiting-returns'
+import { removeWaitingTag } from '@/lib/waiting'
+import { combineDateAndTime } from '@/lib/utils'
+import { formatFlexibleEventDescription } from '@/lib/flexible-events'
 
 // Components
 import { useChantiers } from '@/components/projects/useChantiers'
@@ -19,10 +29,20 @@ function ChantiersContent() {
   const searchParams = useSearchParams()
   const urlStatus = searchParams.get('status')
   const {
-    projects, setProjects, tasks, setTasks, events, setEvents, loading,
+    projects, setProjects, tasks, setTasks, events, setEvents,
+    waitingReturns, setWaitingReturns, loading,
     statusFilter, setStatusFilter, supabase, saveTimeoutRef,
     toastMsg, showToast, handleStatusChange, handleDeleteProject, getProjectCompletion
   } = useChantiers(urlStatus)
+
+  // Task form modal state
+  const [isTaskFormOpen, setIsTaskFormOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [initialTaskFormData, setInitialTaskFormData] = useState<Partial<TaskFormData> | null>(null)
+
+  // Follow-up modal state
+  const [followUpTask, setFollowUpTask] = useState<Task | null>(null)
+  const [isFollowUpOpen, setIsFollowUpOpen] = useState(false)
 
   // Modals state
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false)
@@ -131,6 +151,116 @@ function ChantiersContent() {
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: nextStatus } : t))
     await supabase.from('tasks').update({ status: nextStatus }).eq('id', task.id)
     showToast(nextStatus === 'fait' ? 'Tâche marquée comme terminée !' : 'Tâche réactivée')
+    if (nextStatus === 'fait') {
+      setFollowUpTask(task)
+      setIsFollowUpOpen(true)
+    }
+  }
+
+  const handleSaveTask = async (formData: TaskFormData) => {
+    let finalDescription = formatTaskDescriptionWithBlocker(
+      formData.description,
+      formData.blocker
+    )
+
+    if (formData.status === 'en attente de retour externe') {
+      if (formData.waitingReturnId) {
+        finalDescription = formatTaskWithWaitingReturn(finalDescription, formData.waitingReturnId)
+      }
+    } else {
+      finalDescription = formatTaskWithWaitingReturn(finalDescription, null)
+      finalDescription = removeWaitingTag(finalDescription)
+    }
+
+    // Rattachement au chantier IT (prefilled with activeWorkspaceProject if not overridden)
+    finalDescription = formatTaskDescriptionWithProject(finalDescription, formData.projectId || activeWorkspaceProject?.id || null)
+
+    if (editingTask) {
+      const wasFait = editingTask.status === 'fait'
+      const isNowFait = formData.status === 'fait'
+
+      const { data, error } = await supabase
+        .from('tasks')
+        .update({
+          title: formData.title,
+          description: finalDescription,
+          category: formData.category,
+          priority: formData.priority,
+          status: formData.status
+        })
+        .eq('id', editingTask.id)
+        .select()
+        .single()
+
+      if (data && !error) {
+        setTasks(prev => prev.map(t => t.id === data.id ? data : t))
+        setIsTaskFormOpen(false)
+        setEditingTask(null)
+        setInitialTaskFormData(null)
+        showToast('Tâche mise à jour !')
+
+        if (!wasFait && isNowFait) {
+          setFollowUpTask(data)
+          setIsFollowUpOpen(true)
+        }
+      }
+    } else {
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert([{
+          title: formData.title,
+          description: finalDescription,
+          category: formData.category,
+          priority: formData.priority,
+          status: formData.status
+        }])
+        .select()
+        .single()
+
+      if (data && !error) {
+        setTasks(prev => [data, ...prev])
+        setIsTaskFormOpen(false)
+        setEditingTask(null)
+        setInitialTaskFormData(null)
+
+        if (formData.createAlsoEvent) {
+          const baseEventDate = formData.eventDate || new Date().toISOString().split('T')[0]
+          const eventDate = combineDateAndTime(baseEventDate, formData.eventTime)
+          const eventType = formData.eventType || 'échéance'
+          let finalEndDate = formData.eventEndDate ? combineDateAndTime(formData.eventEndDate, formData.eventTime) : null
+          if (formData.eventIsFlexible && !finalEndDate) {
+            const d = new Date(baseEventDate + 'T00:00:00')
+            d.setDate(d.getDate() + 14)
+            finalEndDate = d.toISOString().split('T')[0]
+          }
+          const baseDesc = formData.description.trim() || ''
+          const finalDesc = formData.eventIsFlexible 
+            ? formatFlexibleEventDescription(baseDesc, formData.eventFlexLabel || 'Dans les 2 prochaines semaines')
+            : baseDesc
+
+          const { data: newEv } = await supabase
+            .from('events')
+            .insert([{
+              title: formData.title,
+              description: finalDesc,
+              event_date: eventDate,
+              end_date: formData.eventIsFlexible ? finalEndDate : null,
+              event_type: eventType,
+              status: 'à venir',
+              task_id: data.id,
+              vendor_id: null
+            }])
+            .select()
+            .single()
+
+          if (newEv) {
+            setEvents(prev => [...prev, newEv as CalendarEvent])
+          }
+        }
+
+        showToast('Nouvelle tâche rattachée au chantier !')
+      }
+    }
   }
 
   const handleCreateProjectTask = async (e: React.FormEvent) => {
@@ -243,12 +373,83 @@ function ChantiersContent() {
         newTaskPriority={newTaskPriority} setNewTaskPriority={setNewTaskPriority} taskToLink={taskToLink} setTaskToLink={setTaskToLink}
         handleCreateProjectTask={handleCreateProjectTask} handleLinkExistingTask={handleLinkExistingTask}
         handleToggleTaskStatus={handleToggleTaskStatus} handleDetachTaskFromProject={handleDetachTaskFromProject} handleDeleteTask={handleDeleteTask}
+        onOpenCreateTaskDialog={() => {
+          setEditingTask(null)
+          setInitialTaskFormData({
+            projectId: activeWorkspaceProject?.id || null,
+            category: 'Cahier des charges',
+            priority: 'moyenne',
+            status: 'à faire'
+          })
+          setIsTaskFormOpen(true)
+        }}
+        onEditTask={(task) => {
+          setEditingTask(task)
+          setInitialTaskFormData(null)
+          setIsTaskFormOpen(true)
+        }}
         newEventTitle={newEventTitle} setNewEventTitle={setNewEventTitle} newEventDate={newEventDate} setNewEventDate={setNewEventDate}
         newEventType={newEventType} setNewEventType={setNewEventType} handleCreateProjectEvent={handleCreateProjectEvent}
         handleNotesChange={handleNotesChange}
       />
       <ProjectFormDialog isOpen={isAddProjectOpen} onClose={() => setIsAddProjectOpen(false)} title="Ajouter un chantier" formState={newProject} setFormState={setNewProject} onSave={handleAddProject} submitLabel="Enregistrer" />
       <ProjectFormDialog isOpen={isEditProjectOpen} onClose={() => setIsEditProjectOpen(false)} title="Modifier le chantier" formState={editProjectForm} setFormState={setEditProjectForm} onSave={handleUpdateProject} submitLabel="Enregistrer les modifications" />
+
+      {/* Dialogue complet de création / modification de tâche */}
+      <TaskFormDialog
+        open={isTaskFormOpen}
+        onClose={() => {
+          setIsTaskFormOpen(false)
+          setEditingTask(null)
+          setInitialTaskFormData(null)
+        }}
+        editingTask={editingTask}
+        initialData={initialTaskFormData}
+        onBackToFollowUp={followUpTask ? () => {
+          setIsTaskFormOpen(false)
+          setEditingTask(null)
+          setInitialTaskFormData(null)
+          setIsFollowUpOpen(true)
+        } : undefined}
+        tasks={tasks}
+        events={events}
+        waitingReturns={waitingReturns}
+        projects={projects}
+        onCreateReturnInline={async (title, waiting_on) => {
+          const created = await createWaitingReturn(supabase, {
+            title,
+            waiting_on,
+            target_type: 'Prestataire',
+            status: 'en attente'
+          })
+          if (created) {
+            setWaitingReturns(prev => [created, ...prev])
+          }
+          return created
+        }}
+        onSave={handleSaveTask}
+      />
+
+      {/* Dialogue de suite logique sur tâche terminée dans le chantier */}
+      <TaskFollowUpDialog
+        open={isFollowUpOpen}
+        task={followUpTask}
+        onClose={() => {
+          setIsFollowUpOpen(false)
+          setFollowUpTask(null)
+        }}
+        onRequestCreateTask={(prefill) => {
+          setEditingTask(null)
+          setInitialTaskFormData({
+            ...prefill,
+            projectId: prefill.projectId || activeWorkspaceProject?.id || null
+          })
+          setIsTaskFormOpen(true)
+        }}
+        onSuccessMessage={(msg) => {
+          showToast(msg)
+        }}
+      />
     </div>
   )
 }

@@ -156,7 +156,7 @@ export function TaskFormDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose}>
+    <Dialog open={open} onClose={onClose} closeOnClickOutside={false}>
       <DialogHeader>
         <div className="flex items-center justify-between gap-2 pr-6">
           <DialogTitle>

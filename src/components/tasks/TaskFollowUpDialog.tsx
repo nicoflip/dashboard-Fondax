@@ -234,7 +234,7 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
   }
 
   return (
-    <Dialog open={open} onClose={onClose} className="max-w-xl">
+    <Dialog open={open} onClose={onClose} className="max-w-xl" closeOnClickOutside={false}>
       <DialogHeader>
         <div className="flex items-center gap-2 text-emerald-600">
           <CheckCircle2 className="w-6 h-6" />

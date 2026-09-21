@@ -11,14 +11,25 @@ interface DialogProps {
   children: React.ReactNode
   className?: string
   hideCloseButton?: boolean
+  closeOnClickOutside?: boolean
 }
 
-function Dialog({ open, onClose, onOpenChange, children, className, hideCloseButton = false }: DialogProps) {
+function Dialog({
+  open,
+  onClose,
+  onOpenChange,
+  children,
+  className,
+  hideCloseButton = false,
+  closeOnClickOutside = true,
+}: DialogProps) {
   const handleClose = useCallback(() => {
     onClose?.()
     onOpenChange?.(false)
   }, [onClose, onOpenChange])
   const overlayRef = useRef<HTMLDivElement>(null)
+  const backdropRef = useRef<HTMLDivElement>(null)
+  const isMouseDownOnBackdrop = useRef(false)
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -44,19 +55,34 @@ function Dialog({ open, onClose, onOpenChange, children, className, hideCloseBut
     <div
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center"
+      onMouseDown={(e) => {
+        isMouseDownOnBackdrop.current = (e.target === overlayRef.current || e.target === backdropRef.current)
+      }}
       onClick={(e) => {
-        if (e.target === overlayRef.current) handleClose()
+        if (
+          closeOnClickOutside &&
+          isMouseDownOnBackdrop.current &&
+          (e.target === overlayRef.current || e.target === backdropRef.current)
+        ) {
+          handleClose()
+        }
       }}
     >
-      <div className="fixed inset-0 bg-black/50" />
+      <div ref={backdropRef} className="fixed inset-0 bg-black/50" />
       <div
         className={cn(
           'relative z-50 w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-xl shadow-xl border border-slate-200 p-6 mx-4',
           className
         )}
+        onMouseDown={(e) => {
+          isMouseDownOnBackdrop.current = false
+          e.stopPropagation()
+        }}
+        onClick={(e) => e.stopPropagation()}
       >
         {!hideCloseButton && (
           <button
+            type="button"
             onClick={handleClose}
             className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
           >
