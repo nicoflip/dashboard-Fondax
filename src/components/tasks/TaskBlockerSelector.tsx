@@ -44,7 +44,8 @@ import {
   Phone,
   Flag,
   FolderKanban,
-  User
+  User,
+  Plus
 } from 'lucide-react'
 
 export type { BlockerType, BlockerConfig }
@@ -56,6 +57,7 @@ interface TaskBlockerSelectorProps {
   waitingReturns?: WaitingReturn[]
   value: BlockerConfig
   onChange: (val: BlockerConfig) => void
+  onCreateReturnInline?: (title: string, waiting_on: string) => Promise<WaitingReturn | null>
 }
 
 export function TaskBlockerSelector({
@@ -64,7 +66,8 @@ export function TaskBlockerSelector({
   events,
   waitingReturns = [],
   value,
-  onChange
+  onChange,
+  onCreateReturnInline
 }: TaskBlockerSelectorProps) {
   // Search & filter states
   const [taskSearch, setTaskSearch] = useState('')
@@ -74,6 +77,10 @@ export function TaskBlockerSelector({
   const [eventTypeFilter, setEventTypeFilter] = useState<string>('ALL')
 
   const [waitingSearch, setWaitingSearch] = useState('')
+  const [isCreatingReturnInline, setIsCreatingReturnInline] = useState(false)
+  const [inlineReturnTitle, setInlineReturnTitle] = useState('')
+  const [inlineReturnWho, setInlineReturnWho] = useState('')
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false)
 
   // Filter waiting returns (retours attendus)
   const filteredWaitingReturns = useMemo(() => {
@@ -300,114 +307,197 @@ export function TaskBlockerSelector({
       {/* MODE 2: BLOQUÉE PAR UN RETOUR TIERS ATTENDU */}
       {value.type === 'waiting' && (
         <div className="space-y-3 bg-white p-3.5 rounded-xl border border-amber-300 shadow-2xs">
-          {/* Selected Waiting Return Banner */}
-          {selectedWaitingReturn ? (
-            <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-300 rounded-lg">
-              <div className="flex items-center gap-2 min-w-0">
-                <div className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
-                  <Hourglass className="w-3.5 h-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">
-                    Retour attendu bloquant sélectionné :
-                  </p>
-                  <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
-                    {selectedWaitingReturn.title}
-                  </p>
-                  <p className="text-[11px] text-amber-900">
-                    En attente de : <strong>{selectedWaitingReturn.waiting_on}</strong> ({selectedWaitingReturn.target_type || 'Prestataire'})
-                  </p>
-                </div>
+          {isCreatingReturnInline ? (
+            <div className="space-y-2.5 bg-amber-50/50 p-3 rounded-lg border border-amber-300 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                  <Hourglass className="w-3.5 h-3.5 text-amber-600" />
+                  Créer un nouveau retour attendu :
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingReturnInline(false)}
+                  className="text-[11px] text-slate-500 hover:text-slate-800 font-medium cursor-pointer hover:underline"
+                >
+                  Annuler / Choisir existant
+                </button>
               </div>
+              <Input
+                placeholder="Objet du retour (ex: Devis fibre Orange, Validation devis...)"
+                value={inlineReturnTitle}
+                onChange={e => setInlineReturnTitle(e.target.value)}
+                className="h-8 text-xs bg-white"
+              />
+              <Input
+                placeholder="Interlocuteur (ex: Orange, Direction, Patrick...)"
+                value={inlineReturnWho}
+                onChange={e => setInlineReturnWho(e.target.value)}
+                className="h-8 text-xs bg-white"
+              />
               <Button
                 type="button"
-                variant="ghost"
                 size="sm"
-                onClick={() => onChange({ ...value, prereqReturnId: '', prereqTaskId: '' })}
-                className="h-7 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                onClick={async () => {
+                  if (!inlineReturnTitle.trim() || !inlineReturnWho.trim() || !onCreateReturnInline) return
+                  setIsSubmittingReturn(true)
+                  try {
+                    const created = await onCreateReturnInline(inlineReturnTitle.trim(), inlineReturnWho.trim())
+                    if (created) {
+                      onChange({ ...value, prereqReturnId: created.id, prereqTaskId: created.id })
+                      setIsCreatingReturnInline(false)
+                      setInlineReturnTitle('')
+                      setInlineReturnWho('')
+                    }
+                  } finally {
+                    setIsSubmittingReturn(false)
+                  }
+                }}
+                disabled={!inlineReturnTitle.trim() || !inlineReturnWho.trim() || isSubmittingReturn}
+                className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white cursor-pointer font-semibold"
               >
-                Changer
+                {isSubmittingReturn ? 'Création...' : 'Créer et associer à cette tâche'}
               </Button>
             </div>
           ) : (
-            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>Cliquez sur un retour attendu ci-dessous pour qu&apos;il bloque cette tâche jusqu&apos;à réception de la réponse.</span>
-            </div>
-          )}
-
-          {/* Search bar */}
-          <div className="space-y-2 pt-1">
-            <div className="relative">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-              <Input
-                placeholder="Rechercher parmi vos retours attendus ou interlocuteurs..."
-                value={waitingSearch}
-                onChange={e => setWaitingSearch(e.target.value)}
-                className="pl-9 h-9 text-xs"
-              />
-            </div>
-
-            {/* Waiting returns list */}
-            <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100">
-              {filteredWaitingReturns.length === 0 ? (
-                <p className="text-xs text-slate-400 italic text-center py-4">
-                  Aucun retour attendu trouvé. Créez-en un dans la rubrique « En attente ».
-                </p>
-              ) : (
-                filteredWaitingReturns.map(r => {
-                  const currentId = value.prereqReturnId || value.prereqTaskId
-                  const isSelected = currentId === r.id
-                  const metrics = getWaitingReturnMetrics(r)
-                  return (
-                    <div
-                      key={r.id}
-                      onClick={() => onChange({ ...value, prereqReturnId: r.id, prereqTaskId: r.id })}
-                      className={cn(
-                        "p-2.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-3 text-left group",
-                        isSelected
-                          ? "border-amber-500 bg-amber-50/80 ring-1 ring-amber-400 shadow-2xs"
-                          : "border-slate-200 hover:border-amber-300 hover:bg-amber-50/30 bg-white"
-                      )}
-                    >
-                      <div className="min-w-0 flex-1 space-y-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-bold text-xs text-slate-900 truncate">
-                            {r.title}
-                          </span>
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold">
-                            Tiers : {r.waiting_on}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                          <span>Depuis {metrics.daysWaiting}j</span>
-                          {metrics.formattedFollowUpDate && (
-                            <span>• Relance : {metrics.formattedFollowUpDate}</span>
-                          )}
-                          {r.status === 'reçu' && (
-                            <Badge className="bg-emerald-600 text-white text-[9px] py-0">✓ Reçu</Badge>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="shrink-0">
-                        <div className={cn(
-                          "w-5 h-5 rounded-full border flex items-center justify-center transition-colors",
-                          isSelected ? "bg-amber-600 border-amber-600 text-white" : "border-slate-300 group-hover:border-amber-400 bg-white"
-                        )}>
-                          {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                        </div>
-                      </div>
+            <>
+              {/* Selected Waiting Return Banner */}
+              {selectedWaitingReturn ? (
+                <div className="flex items-center justify-between p-2.5 bg-amber-50 border border-amber-300 rounded-lg">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                      <Hourglass className="w-3.5 h-3.5" />
                     </div>
-                  )
-                })
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-amber-800 font-bold uppercase tracking-wider">
+                        Retour attendu bloquant sélectionné :
+                      </p>
+                      <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                        {selectedWaitingReturn.title}
+                      </p>
+                      <p className="text-[11px] text-amber-900">
+                        En attente de : <strong>{selectedWaitingReturn.waiting_on}</strong> ({selectedWaitingReturn.target_type || 'Prestataire'})
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onChange({ ...value, prereqReturnId: '', prereqTaskId: '' })}
+                    className="h-7 text-xs text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer"
+                  >
+                    Changer
+                  </Button>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Cliquez sur un retour attendu ci-dessous pour qu&apos;il bloque cette tâche jusqu&apos;à réception de la réponse.</span>
+                </div>
               )}
-            </div>
-          </div>
 
-          <p className="text-[11px] text-slate-500 italic">
-            ℹ️ Cette tâche restera bloquée tant que ce retour est en attente. Dès que la réponse arrive dans la rubrique &laquo;&nbsp;En attente&nbsp;&raquo;, la tâche sera automatiquement débloquée !
-          </p>
+              {/* Search bar & Create button */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+                    <Input
+                      placeholder="Rechercher parmi vos retours attendus ou interlocuteurs..."
+                      value={waitingSearch}
+                      onChange={e => setWaitingSearch(e.target.value)}
+                      className="pl-9 h-9 text-xs"
+                    />
+                  </div>
+                  {onCreateReturnInline && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsCreatingReturnInline(true)}
+                      className="h-9 text-xs border-amber-300 bg-amber-50 text-amber-950 hover:bg-amber-100 cursor-pointer shrink-0 font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-1 text-amber-700" />
+                      Nouveau retour
+                    </Button>
+                  )}
+                </div>
+
+                {/* Waiting returns list */}
+                <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 divide-y divide-slate-100">
+                  {filteredWaitingReturns.length === 0 ? (
+                    <div className="text-center py-4 space-y-2">
+                      <p className="text-xs text-slate-400 italic">
+                        Aucun retour attendu trouvé.
+                      </p>
+                      {onCreateReturnInline && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsCreatingReturnInline(true)}
+                          className="h-7 text-xs border-amber-300 text-amber-900 hover:bg-amber-50 cursor-pointer font-medium"
+                        >
+                          <Plus className="w-3.5 h-3.5 mr-1 text-amber-600" />
+                          Créer ce retour attendu maintenant
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    filteredWaitingReturns.map(r => {
+                      const currentId = value.prereqReturnId || value.prereqTaskId
+                      const isSelected = currentId === r.id
+                      const metrics = getWaitingReturnMetrics(r)
+                      return (
+                        <div
+                          key={r.id}
+                          onClick={() => onChange({ ...value, prereqReturnId: r.id, prereqTaskId: r.id })}
+                          className={cn(
+                            "p-2.5 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-3 text-left group",
+                            isSelected
+                              ? "border-amber-500 bg-amber-50/80 ring-1 ring-amber-400 shadow-2xs"
+                              : "border-slate-200 hover:border-amber-300 hover:bg-amber-50/30 bg-white"
+                          )}
+                        >
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-xs text-slate-900 truncate">
+                                {r.title}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-900 border border-amber-300 font-bold">
+                                Tiers : {r.waiting_on}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                              <span>Depuis {metrics.daysWaiting}j</span>
+                              {metrics.formattedFollowUpDate && (
+                                <span>• Relance : {metrics.formattedFollowUpDate}</span>
+                              )}
+                              {r.status === 'reçu' && (
+                                <Badge className="bg-emerald-600 text-white text-[9px] py-0">✓ Reçu</Badge>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="shrink-0">
+                            <div className={cn(
+                              "w-5 h-5 rounded-full border flex items-center justify-center transition-colors",
+                              isSelected ? "bg-amber-600 border-amber-600 text-white" : "border-slate-300 group-hover:border-amber-400 bg-white"
+                            )}>
+                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+
+              <p className="text-[11px] text-slate-500 italic">
+                ℹ️ Cette tâche restera bloquée tant que ce retour est en attente. Dès que la réponse arrive dans la rubrique &laquo;&nbsp;En attente&nbsp;&raquo;, la tâche sera automatiquement débloquée !
+              </p>
+            </>
+          )}
         </div>
       )}
 

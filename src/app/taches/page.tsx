@@ -299,10 +299,12 @@ function TasksContent() {
       formData.blocker
     )
 
-    if (formData.status === 'en attente de retour externe') {
-      if (formData.waitingReturnId) {
-        finalDescription = formatTaskWithWaitingReturn(finalDescription, formData.waitingReturnId)
-      }
+    const returnId = formData.blocker.type === 'waiting'
+      ? (formData.blocker.prereqReturnId || formData.blocker.prereqTaskId || formData.waitingReturnId || null)
+      : (formData.waitingReturnId || null)
+
+    if (returnId) {
+      finalDescription = formatTaskWithWaitingReturn(finalDescription, returnId)
     } else {
       finalDescription = formatTaskWithWaitingReturn(finalDescription, null)
       finalDescription = removeWaitingTag(finalDescription)

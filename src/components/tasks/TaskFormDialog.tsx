@@ -19,10 +19,9 @@ import { extractTaskProjectId } from '@/lib/projects'
 import { TaskBlockerSelector } from './TaskBlockerSelector'
 import { CustomDatePicker } from '@/components/ui/date-picker'
 import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
-import { WaitingReturnSelector } from '@/components/shared/WaitingReturnSelector'
 import { ProjectSelector } from '@/components/shared/ProjectSelector'
 import { Badge } from '@/components/ui/badge'
-import { Hourglass, Calendar as CalendarIcon, User, Plus, Clock, FolderKanban, Flame } from 'lucide-react'
+import { Calendar as CalendarIcon, User, Plus, Clock, FolderKanban, Flame } from 'lucide-react'
 
 export interface TaskFormData {
   title: string
@@ -96,15 +95,9 @@ export function TaskFormDialog({
 }: TaskFormDialogProps) {
   const [formData, setFormData] = useState<TaskFormData>(DEFAULT_FORM_DATA)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isCreatingReturnInline, setIsCreatingReturnInline] = useState(false)
-  const [inlineReturnTitle, setInlineReturnTitle] = useState('')
-  const [inlineReturnWho, setInlineReturnWho] = useState('')
 
   useEffect(() => {
     if (open) {
-      setIsCreatingReturnInline(false)
-      setInlineReturnTitle('')
-      setInlineReturnWho('')
       if (editingTask) {
         const blocker = parseTaskBlocker(editingTask.description)
         const returnId = extractWaitingReturnId(editingTask.description)
@@ -149,7 +142,14 @@ export function TaskFormDialog({
     if (!formData.title.trim()) return
     setIsSubmitting(true)
     try {
-      await onSave(formData)
+      const returnId = formData.blocker.type === 'waiting'
+        ? (formData.blocker.prereqReturnId || formData.blocker.prereqTaskId || null)
+        : null
+      const payload: TaskFormData = {
+        ...formData,
+        waitingReturnId: returnId
+      }
+      await onSave(payload)
     } finally {
       setIsSubmitting(false)
     }
@@ -265,74 +265,20 @@ export function TaskFormDialog({
             id="task-status"
             className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2"
             value={formData.status}
-            onChange={e => setFormData({ ...formData, status: e.target.value as TaskStatus })}
+            onChange={e => {
+              const newStatus = e.target.value as TaskStatus
+              setFormData(prev => ({
+                ...prev,
+                status: newStatus,
+                ...(newStatus === 'en attente de retour externe' && prev.blocker.type === 'none'
+                  ? { blocker: { ...prev.blocker, type: 'waiting' } }
+                  : {})
+              }))
+            }}
           >
             {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-
-        {/* Choix du retour attendu si la tâche est en attente */}
-        {formData.status === 'en attente de retour externe' && (
-          <div className="rounded-xl border border-amber-300 bg-amber-50/60 p-3.5 space-y-3 shadow-2xs animate-in fade-in">
-            {!isCreatingReturnInline ? (
-              <WaitingReturnSelector
-                waitingReturns={waitingReturns}
-                value={formData.waitingReturnId || null}
-                onChange={id => setFormData({ ...formData, waitingReturnId: id })}
-                label="Quel retour cette tâche attend-elle ?"
-                placeholder="Rechercher et associer un retour attendu..."
-                onCreateNew={() => setIsCreatingReturnInline(true)}
-              />
-            ) : (
-              /* Inline form to create new return */
-              <div className="space-y-2 bg-white p-3 rounded-lg border border-amber-200">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
-                    <Hourglass className="w-3.5 h-3.5 text-amber-600" />
-                    Créer un nouveau retour attendu :
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setIsCreatingReturnInline(false)}
-                    className="text-[11px] text-slate-500 hover:text-slate-800 font-medium cursor-pointer"
-                  >
-                    Annuler / Choisir existant
-                  </button>
-                </div>
-                <Input
-                  placeholder="Objet du retour (ex: Devis fibre Orange, Validation devis...)"
-                  value={inlineReturnTitle}
-                  onChange={e => setInlineReturnTitle(e.target.value)}
-                  className="h-8 text-xs"
-                />
-                <Input
-                  placeholder="Interlocuteur (ex: Orange, Direction, Patrick...)"
-                  value={inlineReturnWho}
-                  onChange={e => setInlineReturnWho(e.target.value)}
-                  className="h-8 text-xs"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={async () => {
-                    if (!inlineReturnTitle.trim() || !inlineReturnWho.trim() || !onCreateReturnInline) return
-                    const created = await onCreateReturnInline(inlineReturnTitle.trim(), inlineReturnWho.trim())
-                    if (created) {
-                      setFormData(prev => ({ ...prev, waitingReturnId: created.id }))
-                      setIsCreatingReturnInline(false)
-                      setInlineReturnTitle('')
-                      setInlineReturnWho('')
-                    }
-                  }}
-                  disabled={!inlineReturnTitle.trim() || !inlineReturnWho.trim()}
-                  className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
-                >
-                  Créer et associer à cette tâche
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Rattachement à un chantier IT */}
         <ProjectSelector
@@ -366,7 +312,7 @@ export function TaskFormDialog({
           />
         )}
 
-        {/* Dépendance conditionnelle */}
+        {/* Dépendance conditionnelle (centralise tous les blocages, y compris les retours attendus) */}
         <TaskBlockerSelector
           currentTaskId={editingTask?.id}
           tasks={tasks}
@@ -374,6 +320,7 @@ export function TaskFormDialog({
           waitingReturns={waitingReturns}
           value={formData.blocker}
           onChange={b => setFormData({ ...formData, blocker: b })}
+          onCreateReturnInline={onCreateReturnInline}
         />
       </div>
 
