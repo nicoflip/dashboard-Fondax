@@ -104,7 +104,12 @@ function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingEl
 }
 
 function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100 shrink-0', className)} {...props} />
+  return (
+    <div
+      className={cn('flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 mt-4 shrink-0', className)}
+      {...props}
+    />
+  )
 }
 
 function DialogContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

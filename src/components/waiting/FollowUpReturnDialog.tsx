@@ -111,7 +111,7 @@ export function FollowUpReturnDialog({
   const nextCount = (returnItem.follow_up_count || 0) + 1
 
   return (
-    <Dialog open={open} onClose={onClose} className="max-w-md">
+    <Dialog open={open} onClose={onClose} className="max-w-md max-h-[90vh] flex flex-col">
       <DialogHeader>
         <div className="flex items-center gap-2 text-amber-600">
           <Bell className="w-5 h-5 animate-bounce" />
@@ -122,7 +122,7 @@ export function FollowUpReturnDialog({
         </p>
       </DialogHeader>
 
-      <div className="space-y-4 py-3">
+      <div className="space-y-4 py-3 overflow-y-auto flex-1 min-h-0 pr-1.5">
         {/* Rappel du dossier & interlocuteur */}
         <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 text-xs space-y-1">
           <div className="flex items-center justify-between">
@@ -252,14 +252,14 @@ export function FollowUpReturnDialog({
         )}
       </div>
 
-      <DialogFooter className="gap-2 sm:gap-0">
+      <DialogFooter className="gap-2 sm:gap-0 pt-3 border-t border-slate-100 shrink-0">
         <Button variant="outline" onClick={onClose} disabled={isSubmitting}>
           Annuler
         </Button>
         <Button
           onClick={handleConfirm}
           disabled={isSubmitting || (selectedMode === 'custom' && !customDate)}
-          className="bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+          className="bg-amber-600 hover:bg-amber-700 text-white font-semibold cursor-pointer"
         >
           {isSubmitting ? 'Enregistrement...' : 'Valider la relance'}
         </Button>
