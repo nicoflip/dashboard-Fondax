@@ -22,7 +22,7 @@ import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
 import { WaitingReturnSelector } from '@/components/shared/WaitingReturnSelector'
 import { ProjectSelector } from '@/components/shared/ProjectSelector'
 import { Badge } from '@/components/ui/badge'
-import { Hourglass, Calendar as CalendarIcon, User, Plus, Clock, FolderKanban } from 'lucide-react'
+import { Hourglass, Calendar as CalendarIcon, User, Plus, Clock, FolderKanban, Flame } from 'lucide-react'
 
 export interface TaskFormData {
   title: string
@@ -212,15 +212,50 @@ export function TaskFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="task-priority">Priorité</Label>
-            <select
-              id="task-priority"
-              className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2"
-              value={formData.priority}
-              onChange={e => setFormData({ ...formData, priority: e.target.value as TaskPriority })}
-            >
-              {TASK_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
+            <Label>Priorité</Label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, priority: 'haute' })}
+                className={cn(
+                  "py-2 px-2.5 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                  formData.priority === 'haute'
+                    ? "bg-red-600 text-white border-red-700 ring-2 ring-red-400/50 shadow-xs scale-102"
+                    : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                )}
+              >
+                <Flame className="w-3.5 h-3.5 fill-red-400" />
+                <span>Haute</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, priority: 'moyenne' })}
+                className={cn(
+                  "py-2 px-2.5 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                  formData.priority === 'moyenne'
+                    ? "bg-amber-600 text-white border-amber-700 ring-2 ring-amber-400/50 shadow-xs scale-102"
+                    : "bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100"
+                )}
+              >
+                <span>⚡</span>
+                <span>Moyenne</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, priority: 'basse' })}
+                className={cn(
+                  "py-2 px-2.5 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                  formData.priority === 'basse'
+                    ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-400/50 shadow-xs scale-102"
+                    : "bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100"
+                )}
+              >
+                <span>🌱</span>
+                <span>Basse</span>
+              </button>
+            </div>
           </div>
         </div>
 

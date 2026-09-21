@@ -24,7 +24,7 @@ import {
 } from '@/lib/projects'
 import { combineDateAndTime, normalizeTaskCategory, TASK_CATEGORIES } from '@/lib/utils'
 import { TaskCard } from '@/components/tasks/TaskCard'
-import { TaskFilters, TaskTab, ChantierFilterMode } from '@/components/tasks/TaskFilters'
+import { TaskFilters, ChantierFilterMode } from '@/components/tasks/TaskFilters'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
 import { TaskScheduleDialog, ScheduleEventData } from '@/components/tasks/TaskScheduleDialog'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
@@ -51,7 +51,6 @@ function TasksContent() {
   const [loading, setLoading] = useState(true)
 
   // Filters state
-  const [activeTab, setActiveTab] = useState<TaskTab>('a-traiter')
   const [filterCat, setFilterCat] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterPriority, setFilterPriority] = useState('all')
@@ -99,20 +98,16 @@ function TasksContent() {
     fetchTasks()
   }, [])
 
-  // Sync tab and priority from URL query parameters
+  // Sync priority from URL query parameters
   useEffect(() => {
     if (urlTab === 'urgentes' || urlPriority === 'haute') {
-      setActiveTab('urgentes')
       setFilterPriority('haute')
-    } else if (urlTab === 'a-traiter') {
-      setActiveTab('a-traiter')
+    } else if (urlTab === 'a-traiter' || urlTab === 'toutes') {
       setFilterPriority('all')
     } else if (urlTab === 'en-attente') {
-      setActiveTab('en-attente')
+      setFilterPriority('en-attente')
     } else if (urlTab === 'terminees') {
-      setActiveTab('terminees')
-    } else if (urlTab === 'toutes') {
-      setActiveTab('toutes')
+      setFilterPriority('terminees')
     }
   }, [urlTab, urlPriority])
 
@@ -457,14 +452,31 @@ function TasksContent() {
     return counts
   }, [tasks])
 
+  // Counts by priority
+  const priorityCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      haute: tasks.filter(t => t.priority === 'haute' && t.status !== 'fait').length,
+      moyenne: tasks.filter(t => t.priority === 'moyenne' && t.status !== 'fait').length,
+      basse: tasks.filter(t => t.priority === 'basse' && t.status !== 'fait').length,
+    }
+    return counts
+  }, [tasks])
+
   // Filtered & sorted tasks
   const filteredTasks = useMemo(() => {
     const filtered = tasks.filter(task => {
-      // Tab filter
-      if (activeTab === 'urgentes' && (task.priority !== 'haute' || task.status === 'fait')) return false
-      if (activeTab === 'a-traiter' && !['à faire', 'en cours'].includes(task.status)) return false
-      if (activeTab === 'en-attente' && task.status !== 'en attente de retour externe') return false
-      if (activeTab === 'terminees' && task.status !== 'fait') return false
+      // Priority / Status filter
+      if (filterPriority === 'haute') {
+        if (task.priority !== 'haute' || task.status === 'fait') return false
+      } else if (filterPriority === 'moyenne') {
+        if (task.priority !== 'moyenne' || task.status === 'fait') return false
+      } else if (filterPriority === 'basse') {
+        if (task.priority !== 'basse' || task.status === 'fait') return false
+      } else if (filterPriority === 'en-attente') {
+        if (task.status !== 'en attente de retour externe') return false
+      } else if (filterPriority === 'terminees') {
+        if (task.status !== 'fait') return false
+      }
 
       // Chantier Isolation Filter
       if (filterChantierMode === 'with_chantier') {
@@ -482,7 +494,6 @@ function TasksContent() {
       // Dropdown filters (avec normalisation de la catégorie)
       if (filterCat !== 'all' && normalizeTaskCategory(task.category) !== filterCat) return false
       if (filterStatus !== 'all' && task.status !== filterStatus) return false
-      if (filterPriority !== 'all' && task.priority !== filterPriority) return false
 
       // Masquage optionnel des tâches bloquées
       if (hideBlocked && task.status !== 'fait') {
@@ -494,7 +505,7 @@ function TasksContent() {
     })
 
     return sortTasksWithBlockers(filtered, events, waitingReturns)
-  }, [tasks, events, waitingReturns, projects, activeTab, filterChantierMode, filterProject, filterCat, filterStatus, filterPriority, hideBlocked])
+  }, [tasks, events, waitingReturns, projects, filterChantierMode, filterProject, filterCat, filterStatus, filterPriority, hideBlocked])
 
   const activeTasks = useMemo(() => filteredTasks.filter(t => t.status !== 'fait'), [filteredTasks])
   const doneTasks = useMemo(() => filteredTasks.filter(t => t.status === 'fait'), [filteredTasks])
@@ -532,14 +543,9 @@ function TasksContent() {
 
       {/* Barre de filtres et onglets */}
       <TaskFilters
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab)
-          if (tab === 'urgentes') setFilterPriority('haute')
-          else setFilterPriority('all')
-        }}
         counts={tabCounts}
         categoryCounts={categoryCounts}
+        priorityCounts={priorityCounts}
         filterCat={filterCat}
         onFilterCatChange={setFilterCat}
         filterStatus={filterStatus}
@@ -557,8 +563,8 @@ function TasksContent() {
         totalDisplayed={filteredTasks.length}
       />
 
-      {/* Bandeau explicatif & stats spécifiques à l'onglet "En attente" */}
-      {activeTab === 'en-attente' && (
+      {/* Bandeau explicatif & stats spécifiques au filtre "En attente" */}
+      {filterPriority === 'en-attente' && (
         <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50/90 via-white to-amber-50/40 p-4 shadow-xs space-y-3 animate-in fade-in duration-200">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-amber-100 pb-3">
             <div className="flex items-center gap-3 text-amber-950">
@@ -610,20 +616,23 @@ function TasksContent() {
           <p className="font-medium text-slate-600">Aucune tâche ne correspond aux critères sélectionnés.</p>
           {filterCat !== 'all' && (
             <p className="text-xs text-blue-600 font-semibold mt-1">
-              💡 Le sujet « {filterCat} » est sélectionné ({categoryCounts[filterCat] || 0} tâche(s) au total). Si elle n'apparaît pas ici, vérifiez dans les autres onglets (« En attente », « Terminées », ou « Toutes »).
+              💡 Le sujet « {filterCat} » est sélectionné ({categoryCounts[filterCat] || 0} tâche(s) au total).
             </p>
           )}
-          {activeTab === 'urgentes' && (
-            <p className="text-xs text-slate-400 mt-1">Bonne nouvelle ! Aucune tâche prioritaire en attente.</p>
+          {filterPriority === 'haute' && (
+            <p className="text-xs text-slate-400 mt-1">Bonne nouvelle ! Aucune tâche prioritaire haute en attente.</p>
           )}
-          {activeTab === 'en-attente' && (
+          {filterPriority === 'en-attente' && (
             <p className="text-xs text-slate-400 mt-1">Aucune tâche en attente de retour externe actuellement.</p>
+          )}
+          {filterPriority === 'terminees' && (
+            <p className="text-xs text-slate-400 mt-1">Aucune tâche terminée dans cette sélection.</p>
           )}
         </Card>
       ) : (
         <div className="space-y-10">
           {/* Section 1 : Tâches actives / prioritaires */}
-          {activeTab !== 'terminees' && (
+          {filterPriority !== 'terminees' && (
             <div>
               {activeTasks.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 border border-dashed rounded-lg bg-slate-50/50">
@@ -661,7 +670,7 @@ function TasksContent() {
           )}
 
           {/* Section 2 : Tâches terminées reléguées en bas de page */}
-          {(activeTab === 'terminees' || (activeTab === 'toutes' && doneTasks.length > 0)) && (
+          {(filterPriority === 'terminees' || (filterPriority === 'all' && doneTasks.length > 0)) && (
             <div className="pt-8 border-t border-slate-200/80 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
