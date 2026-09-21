@@ -6,7 +6,8 @@ import {
   cn, 
   TASK_CATEGORIES, 
   TASK_STATUSES, 
-  TASK_PRIORITIES 
+  TASK_PRIORITIES,
+  TASK_CATEGORY_THEMES 
 } from '@/lib/utils'
 import { Flame, Hourglass, FolderKanban, Layers, X } from 'lucide-react'
 import { Project } from '@/lib/types'
@@ -27,6 +28,7 @@ interface TaskFiltersProps {
     withChantier: number
     withoutChantier: number
   }
+  categoryCounts?: Record<string, number>
   filterCat: string
   onFilterCatChange: (cat: string) => void
   filterStatus: string
@@ -48,6 +50,7 @@ export function TaskFilters({
   activeTab,
   onTabChange,
   counts,
+  categoryCounts,
   filterCat,
   onFilterCatChange,
   filterStatus,
@@ -140,6 +143,86 @@ export function TaskFilters({
         >
           Toutes <span className="ml-1 opacity-70">({counts.toutes})</span>
         </button>
+      </div>
+
+      {/* Barre visuelle des Sujets / Catégories */}
+      <div className="space-y-2 bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+            <Layers className="w-3.5 h-3.5 text-blue-600" />
+            Sujets / Thématiques :
+          </span>
+          {filterCat !== 'all' && (
+            <button
+              type="button"
+              onClick={() => onFilterCatChange('all')}
+              className="text-xs text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 cursor-pointer font-semibold"
+            >
+              <X className="w-3.5 h-3.5" /> Voir tous les sujets
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onFilterCatChange('all')}
+            className={cn(
+              "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border shadow-2xs flex items-center gap-1.5",
+              filterCat === 'all'
+                ? "bg-slate-900 text-white border-slate-900 ring-2 ring-slate-400/50 scale-102"
+                : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200"
+            )}
+          >
+            <span>Tous les sujets</span>
+            {counts.toutes !== undefined && (
+              <span className={cn("px-1.5 py-0.2 rounded-full text-[10px] font-black", filterCat === 'all' ? "bg-slate-800 text-white" : "bg-slate-200 text-slate-700")}>
+                {counts.toutes}
+              </span>
+            )}
+          </button>
+
+          {TASK_CATEGORIES.map(cat => {
+            const theme = TASK_CATEGORY_THEMES[cat]
+            const count = categoryCounts ? (categoryCounts[cat] || 0) : undefined
+            const isSelected = filterCat === cat
+            const pillStyle = isSelected ? theme?.pillSelectedStyle : theme?.pillStyle
+            const counterStyle = isSelected ? theme?.counterSelectedStyle : theme?.counterStyle
+
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => onFilterCatChange(isSelected ? 'all' : cat)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border shadow-2xs flex items-center gap-1.5",
+                  isSelected
+                    ? "scale-105 shadow-xs ring-2 ring-offset-1"
+                    : "hover:scale-102 hover:shadow-xs"
+                )}
+                style={pillStyle ? {
+                  backgroundColor: pillStyle.backgroundColor,
+                  borderColor: pillStyle.borderColor,
+                  color: pillStyle.color,
+                } : undefined}
+              >
+                <span>{theme?.emoji}</span>
+                <span>{cat}</span>
+                {count !== undefined && (
+                  <span 
+                    className="px-1.5 py-0.2 rounded-full text-[10px] font-black transition-colors"
+                    style={counterStyle ? {
+                      backgroundColor: counterStyle.backgroundColor,
+                      color: counterStyle.color,
+                    } : undefined}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {/* Barre d'isolation rapide : Chantiers vs Tâches générales */}

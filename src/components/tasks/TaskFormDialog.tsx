@@ -156,7 +156,7 @@ export function TaskFormDialog({
   }
 
   return (
-    <Dialog open={open} onClose={onClose} closeOnClickOutside={false}>
+    <Dialog open={open} onClose={onClose} closeOnClickOutside={false} className="max-w-2xl">
       <DialogHeader>
         <div className="flex items-center justify-between gap-2 pr-6">
           <DialogTitle>
@@ -174,7 +174,7 @@ export function TaskFormDialog({
         </div>
       </DialogHeader>
 
-      <div className="space-y-4 py-4 max-h-[75vh] overflow-y-auto pr-1">
+      <div className="space-y-4 py-2 overflow-y-auto flex-1 pr-1.5 min-h-0">
         <div className="space-y-2">
           <Label htmlFor="task-title">
             Titre <span className="text-red-500">*</span>

@@ -159,7 +159,7 @@ export function TaskWaitingDialog({
         </p>
       </DialogHeader>
 
-      <div className="space-y-4 py-3 max-h-[75vh] overflow-y-auto pr-1">
+      <div className="space-y-4 py-3 overflow-y-auto flex-1 pr-1.5 min-h-0">
         {/* Bandeau de situation actuel */}
         <div className={cn(
           "rounded-xl border p-3.5 space-y-2 text-xs",

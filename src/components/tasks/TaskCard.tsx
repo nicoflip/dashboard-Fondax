@@ -10,7 +10,9 @@ import {
   TASK_STATUSES, 
   PRIORITY_COLORS, 
   STATUS_COLORS, 
-  TASK_CATEGORY_COLORS, 
+  TASK_CATEGORY_COLORS,
+  TASK_CATEGORY_THEMES,
+  normalizeTaskCategory,
   formatDate 
 } from '@/lib/utils'
 import { Task, CalendarEvent, TaskStatus, WaitingReturn, Project } from '@/lib/types'
@@ -64,6 +66,10 @@ export function TaskCard({
   const isHighPrio = task.priority === 'haute'
   const isUrgent = isHighPrio && !isFait
 
+  // Normaliser la catégorie et trouver la couleur thématique
+  const normalizedCategory = normalizeTaskCategory(task.category)
+  const theme = TASK_CATEGORY_THEMES[normalizedCategory] || TASK_CATEGORY_THEMES['Autre']
+
   // Trouver le retour attendu associé à cette tâche (s'il existe)
   const waitingReturnId = extractWaitingReturnId(task.description)
   const associatedReturn = waitingReturns.find(r => r.id === waitingReturnId) || null
@@ -87,53 +93,37 @@ export function TaskCard({
     waitingReturns
   )
 
-  // Styling visuel selon état et blocage
+  // Styling visuel gai et coloré par catégorie et état
   const borderClass = isBlocked
-    ? 'border-l-4 border-slate-300 border-dashed opacity-50 hover:opacity-85 transition-opacity'
-    : isUrgent 
-    ? 'border-l-[6px] border-l-red-600 border-red-300 ring-2 ring-red-400/40 shadow-md shadow-red-100/70' 
-    : isAttente 
-    ? (activeMetrics.isDragging 
-        ? 'border-l-[6px] border-l-red-600 border-red-200 ring-1 ring-red-300 shadow-xs' 
-        : activeMetrics.isWarning
-        ? 'border-l-4 border-amber-600'
-        : 'border-l-4 border-amber-500')
+    ? 'border-l-[6px] border-l-slate-400 border-slate-300 border-dashed opacity-75 hover:opacity-95 transition-all'
     : isFait 
-    ? 'border-l-4 border-slate-300 opacity-60 bg-slate-50' 
-    : isEnCours 
-    ? 'border-l-4 border-blue-500' 
-    : 'border-l-4 border-slate-300'
+    ? 'border-l-[6px] border-l-emerald-500 border-emerald-300 opacity-80' 
+    : 'border-l-[6px] shadow-xs hover:shadow-md transition-shadow'
 
   const bgClass = isBlocked
-    ? 'bg-slate-50/70 shadow-2xs'
-    : isUrgent 
-    ? 'bg-gradient-to-br from-red-50/70 via-white to-red-50/30' 
-    : isAttente 
-    ? (activeMetrics.isDragging ? 'bg-gradient-to-br from-red-50/60 via-amber-50/30 to-white' : 'bg-amber-50/40') 
+    ? 'bg-slate-100/90 border-slate-300 shadow-2xs'
     : isFait 
-    ? 'bg-slate-50/90' 
-    : 'bg-white'
+    ? 'bg-gradient-to-br from-emerald-100/80 via-green-50 to-emerald-50/60 border-emerald-300 opacity-85' 
+    : ''
+
+  const cardCustomStyle: React.CSSProperties | undefined = (!isBlocked && !isFait && theme?.cardStyle) ? {
+    backgroundColor: theme.cardStyle.backgroundColor,
+    borderColor: theme.cardStyle.borderColor,
+    borderLeftColor: theme.cardStyle.borderLeftColor,
+    borderLeftWidth: '6px',
+    borderLeftStyle: 'solid',
+  } : undefined
 
   return (
-    <Card className={cn("flex flex-col transition-all relative overflow-hidden", borderClass, bgClass)}>
-      {/* Bandeau d'alerte URGENT en haut de la carte */}
-      {isUrgent && !isBlocked && (
-        <div className="bg-gradient-to-r from-red-600 via-red-600 to-rose-600 text-white px-3 py-1.5 text-xs font-black shadow-xs flex items-center justify-between">
-          <span className="flex items-center gap-1.5">
-            <Flame className="w-4 h-4 fill-amber-300 text-amber-300 animate-pulse shrink-0" />
-            <span>URGENT — PRIORITÉ HAUTE</span>
-          </span>
-          <span className="bg-red-800/90 text-white text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded">
-            Action immédiate
-          </span>
-        </div>
-      )}
-
-      <CardHeader className={cn("pb-3", isUrgent && !isBlocked ? "pt-3" : "pt-4")}>
+    <Card 
+      className={cn("flex flex-col transition-all relative overflow-hidden", borderClass, bgClass)}
+      style={cardCustomStyle}
+    >
+      <CardHeader className="pb-3 pt-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {isFait && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
-            {isUrgent && !isBlocked && <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-bounce" />}
+            {isUrgent && !isBlocked && <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-pulse" />}
             {isBlocked && (
               blocker.type === 'date' ? (
                 <span title="Bloquée jusqu'à une date"><Lock className="w-4 h-4 text-amber-600 shrink-0" /></span>
@@ -148,7 +138,7 @@ export function TaskCard({
             <CardTitle 
               className={cn(
                 "cursor-pointer text-lg hover:text-blue-600 hover:underline truncate",
-                isUrgent && !isBlocked && "font-black text-red-950",
+                isUrgent && !isBlocked && "font-bold text-slate-900",
                 isFait && "line-through text-slate-400 font-normal",
                 isBlocked && "text-slate-600 font-medium"
               )}
@@ -364,7 +354,7 @@ export function TaskCard({
             if (isAttente) return <span className="text-amber-900 font-medium">{cleaned}</span>
             if (isUrgent) return <span className="text-slate-800 font-medium">{cleaned}</span>
             if (isFait) return <span className="text-slate-400 italic">{cleaned}</span>
-            return cleaned
+            return <span className="text-slate-700 font-medium">{cleaned}</span>
           })()}
         </CardDescription>
       </CardHeader>
@@ -390,13 +380,17 @@ export function TaskCard({
           <Badge 
             variant="outline" 
             className={cn(
-              "text-xs font-semibold border",
-              TASK_CATEGORY_COLORS[task.category] || "border-slate-200 bg-slate-50 text-slate-700",
-              isUrgent && "font-bold", 
-              isFait && "opacity-60"
+              "text-xs font-bold border px-2.5 py-0.5 shadow-2xs flex items-center gap-1.5",
+              isFait && "opacity-75"
             )}
+            style={theme?.badgeStyle ? {
+              backgroundColor: theme.badgeStyle.backgroundColor,
+              borderColor: theme.badgeStyle.borderColor,
+              color: theme.badgeStyle.color,
+            } : undefined}
           >
-            {task.category}
+            <span>{theme.emoji}</span>
+            <span>{normalizedCategory}</span>
           </Badge>
           {isUrgent ? (
             <Badge className="bg-red-600 text-white font-black flex items-center gap-1 shadow-xs border-red-700">

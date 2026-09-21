@@ -245,7 +245,7 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
         </p>
       </DialogHeader>
 
-      <div className="py-4 space-y-4">
+      <div className="py-3 space-y-4 overflow-y-auto flex-1 pr-1.5 min-h-0">
         {/* Choix des suites logiques */}
         {selectedAction === 'none' && (
           <div className="grid grid-cols-1 gap-3">

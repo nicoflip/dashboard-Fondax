@@ -151,7 +151,7 @@ export function TaskSelectReturnDialog({
         </p>
       </DialogHeader>
 
-      <div className="space-y-4 py-3 max-h-[75vh] overflow-y-auto pr-1">
+      <div className="space-y-4 py-3 overflow-y-auto flex-1 pr-1.5 min-h-0">
         {!isCreatingNew ? (
           <>
             {/* Search and list of existing returns */}

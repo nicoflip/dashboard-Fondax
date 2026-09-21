@@ -71,7 +71,7 @@ function Dialog({
       <div ref={backdropRef} className="fixed inset-0 bg-black/50" />
       <div
         className={cn(
-          'relative z-50 w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white rounded-xl shadow-xl border border-slate-200 p-6 mx-4',
+          'relative z-50 w-full max-w-lg max-h-[90vh] flex flex-col bg-white rounded-xl shadow-xl border border-slate-200 p-6 mx-4 overflow-hidden',
           className
         )}
         onMouseDown={(e) => {
@@ -96,7 +96,7 @@ function Dialog({
 }
 
 function DialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex flex-col space-y-1.5 mb-4', className)} {...props} />
+  return <div className={cn('flex flex-col space-y-1.5 mb-4 shrink-0', className)} {...props} />
 }
 
 function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingElement>) {
@@ -104,7 +104,7 @@ function DialogTitle({ className, ...props }: React.HTMLAttributes<HTMLHeadingEl
 }
 
 function DialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex justify-end gap-2 mt-6', className)} {...props} />
+  return <div className={cn('flex justify-end gap-2 mt-4 pt-3 border-t border-slate-100 shrink-0', className)} {...props} />
 }
 
 function DialogContent({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

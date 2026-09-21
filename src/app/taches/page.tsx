@@ -22,7 +22,7 @@ import {
   isTaskLinkedToChantier, 
   getTaskProject 
 } from '@/lib/projects'
-import { combineDateAndTime } from '@/lib/utils'
+import { combineDateAndTime, normalizeTaskCategory, TASK_CATEGORIES } from '@/lib/utils'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import { TaskFilters, TaskTab, ChantierFilterMode } from '@/components/tasks/TaskFilters'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
@@ -446,6 +446,17 @@ function TasksContent() {
     withoutChantier: tasks.filter(t => !isTaskLinkedToChantier(t, projects)).length
   }), [tasks, waitingTasks, waitingDueCount, projects])
 
+  // Counts by category
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    TASK_CATEGORIES.forEach(cat => { counts[cat] = 0 })
+    tasks.forEach(t => {
+      const norm = normalizeTaskCategory(t.category)
+      counts[norm] = (counts[norm] || 0) + 1
+    })
+    return counts
+  }, [tasks])
+
   // Filtered & sorted tasks
   const filteredTasks = useMemo(() => {
     const filtered = tasks.filter(task => {
@@ -468,8 +479,8 @@ function TasksContent() {
         if (!p || p.id !== filterProject) return false
       }
 
-      // Dropdown filters
-      if (filterCat !== 'all' && task.category !== filterCat) return false
+      // Dropdown filters (avec normalisation de la catégorie)
+      if (filterCat !== 'all' && normalizeTaskCategory(task.category) !== filterCat) return false
       if (filterStatus !== 'all' && task.status !== filterStatus) return false
       if (filterPriority !== 'all' && task.priority !== filterPriority) return false
 
@@ -528,6 +539,7 @@ function TasksContent() {
           else setFilterPriority('all')
         }}
         counts={tabCounts}
+        categoryCounts={categoryCounts}
         filterCat={filterCat}
         onFilterCatChange={setFilterCat}
         filterStatus={filterStatus}
@@ -596,6 +608,11 @@ function TasksContent() {
         <Card className="flex flex-col items-center justify-center p-12 text-slate-500 border-dashed">
           <Flame className="w-10 h-10 text-slate-300 mb-2" />
           <p className="font-medium text-slate-600">Aucune tâche ne correspond aux critères sélectionnés.</p>
+          {filterCat !== 'all' && (
+            <p className="text-xs text-blue-600 font-semibold mt-1">
+              💡 Le sujet « {filterCat} » est sélectionné ({categoryCounts[filterCat] || 0} tâche(s) au total). Si elle n'apparaît pas ici, vérifiez dans les autres onglets (« En attente », « Terminées », ou « Toutes »).
+            </p>
+          )}
           {activeTab === 'urgentes' && (
             <p className="text-xs text-slate-400 mt-1">Bonne nouvelle ! Aucune tâche prioritaire en attente.</p>
           )}
