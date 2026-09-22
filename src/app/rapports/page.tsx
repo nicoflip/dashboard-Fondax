@@ -1,7 +1,7 @@
 'use client'
 
-import React from 'react'
-import { formatDate } from '@/lib/utils'
+import React, { useState } from 'react'
+import { formatDate, cn } from '@/lib/utils'
 import { useReportData } from '@/components/reports/useReportData'
 import { ReportFilters } from '@/components/reports/ReportFilters'
 import { ReportStatsCards } from '@/components/reports/ReportStatsCards'
@@ -9,10 +9,12 @@ import { ReportTaskList } from '@/components/reports/ReportTaskList'
 import { ReportEventsList } from '@/components/reports/ReportEventsList'
 import { ReportProjectsList } from '@/components/reports/ReportProjectsList'
 import { ReportExportActions } from '@/components/reports/ReportExportActions'
+import { ReportExecutiveDocument } from '@/components/reports/ReportExecutiveDocument'
 import { generateMarkdownReport } from '@/components/reports/reportGenerator'
 
 export default function RapportsPage() {
   const data = useReportData()
+  const [viewMode, setViewMode] = useState<'interactive' | 'document'>('interactive')
 
   const handleGenerateMarkdown = () => {
     return generateMarkdownReport({
@@ -27,87 +29,78 @@ export default function RapportsPage() {
     })
   }
 
-  const startDisplay = data.startDate ? formatDate(data.startDate) : 'Début'
+  const startDisplay = data.startDate ? formatDate(data.startDate) : 'Début historique'
   const endDisplay = data.endDate ? formatDate(data.endDate) : "Aujourd'hui"
 
   return (
     <div className="space-y-8 pb-16">
-      {/* Printable Executive Header */}
-      <div className="hidden print:block border-b-2 border-slate-900 pb-4 mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tight">FONDAX SARL</h1>
-            <p className="text-sm font-semibold text-slate-600">Fonderie de précision & Usinage</p>
-          </div>
-          <div className="text-right">
-            <span className="inline-block bg-slate-900 text-white text-xs font-bold px-3 py-1 rounded">
-              RAPPORT D'ACTIVITÉ IT & CHANTIERS
-            </span>
-            <p className="text-xs text-slate-500 mt-1">
-              Généré le {new Date().toLocaleDateString('fr-FR')} à {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 pt-3 border-t border-slate-200 flex justify-between text-xs text-slate-700">
-          <div><strong>Période du rapport :</strong> Du {startDisplay} au {endDisplay}</div>
-          <div><strong>Destinataire :</strong> Direction Générale / Jean-Baptiste TOUZE</div>
-        </div>
-      </div>
-
+      {/* Top Action & Export Header (hidden on print) */}
       <ReportExportActions 
         loading={data.loading}
         fetchData={data.fetchData}
         generateMarkdownReport={handleGenerateMarkdown}
         startDate={data.startDate}
         endDate={data.endDate}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
       />
 
-      <ReportFilters 
-        startDate={data.startDate}
-        endDate={data.endDate}
-        setStartDate={data.setStartDate}
-        setEndDate={data.setEndDate}
-        activePreset={data.activePreset}
-        handlePreset={data.handlePreset}
-      />
+      {/* Date Filters (hidden on print) */}
+      <div className="print:hidden">
+        <ReportFilters 
+          startDate={data.startDate}
+          endDate={data.endDate}
+          setStartDate={data.setStartDate}
+          setEndDate={data.setEndDate}
+          activePreset={data.activePreset}
+          handlePreset={data.handlePreset}
+        />
+      </div>
 
-      <ReportStatsCards kpis={data.kpis} />
+      {/* 1. INTERACTIVE VIEW (Screen only, active when viewMode === 'interactive') */}
+      <div className={cn("space-y-8 print:hidden", viewMode !== 'interactive' && "hidden")}>
+        <ReportStatsCards kpis={data.kpis} />
 
-      <ReportTaskList 
-        completedTasksInPeriod={data.completedTasksInPeriod}
-        startDisplay={startDisplay}
-        endDisplay={endDisplay}
-        selectedCategory={data.selectedCategory}
-        setSelectedCategory={data.setSelectedCategory}
-        categoryCounts={data.categoryCounts}
-        getProjectForTask={data.getProjectForTask}
-        formatTaskDesc={data.formatTaskDesc}
-      />
+        <ReportTaskList 
+          completedTasksInPeriod={data.completedTasksInPeriod}
+          startDisplay={startDisplay}
+          endDisplay={endDisplay}
+          selectedCategory={data.selectedCategory}
+          setSelectedCategory={data.setSelectedCategory}
+          categoryCounts={data.categoryCounts}
+          getProjectForTask={data.getProjectForTask}
+          formatTaskDesc={data.formatTaskDesc}
+        />
 
-      <ReportEventsList 
-        closedEventsInPeriod={data.closedEventsInPeriod}
-        getProjectForEvent={data.getProjectForEvent}
-      />
+        <ReportEventsList 
+          closedEventsInPeriod={data.closedEventsInPeriod}
+          getProjectForEvent={data.getProjectForEvent}
+        />
 
-      <ReportProjectsList 
-        chantiersReport={data.chantiersReport}
-        startDisplay={startDisplay}
-        endDisplay={endDisplay}
-      />
+        <ReportProjectsList 
+          chantiersReport={data.chantiersReport}
+          startDisplay={startDisplay}
+          endDisplay={endDisplay}
+        />
+      </div>
 
-      {/* Signature block for print */}
-      <div className="hidden print:block pt-8 mt-12 border-t border-slate-300">
-        <div className="flex justify-between text-xs text-slate-600">
-          <div>
-            <p className="font-bold text-slate-800">Visa Responsable Informatique</p>
-            <p className="mt-8">Signature : _____________________</p>
-          </div>
-          <div>
-            <p className="font-bold text-slate-800">Visa Direction (Jean-Baptiste TOUZE)</p>
-            <p className="mt-8">Signature : _____________________</p>
-          </div>
-        </div>
+      {/* 2. EXECUTIVE DOCUMENT (A4 Styled Document - Visible on screen when viewMode === 'document', and ALWAYS used for printing) */}
+      <div className={cn(viewMode === 'interactive' ? "hidden print:block" : "block")}>
+        <ReportExecutiveDocument
+          startDate={data.startDate}
+          endDate={data.endDate}
+          startDisplay={startDisplay}
+          endDisplay={endDisplay}
+          kpis={data.kpis}
+          completedTasksInPeriod={data.completedTasksInPeriod}
+          closedEventsInPeriod={data.closedEventsInPeriod}
+          chantiersReport={data.chantiersReport}
+          getProjectForTask={data.getProjectForTask}
+          getProjectForEvent={data.getProjectForEvent}
+          formatTaskDesc={data.formatTaskDesc}
+        />
       </div>
     </div>
   )
 }
+

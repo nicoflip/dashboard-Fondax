@@ -23,9 +23,14 @@ import { formatTaskDescriptionWithBlocker, sortTasksWithBlockers } from '@/lib/b
 import { formatTaskDescriptionWithProject } from '@/lib/projects'
 import { removeWaitingTag } from '@/lib/waiting'
 import { calculateTaskTemperature, formatInactiveTime } from '@/lib/task-temperature'
+import { formatTaskDescriptionWithClosure } from '@/lib/closure-comments'
+import { useTaskThermostat } from '@/lib/task-thermostat'
+import { ThermostatPauseBanner } from '@/components/tasks/ThermostatPauseBanner'
+import { WaitingResponseReceivedDialog } from '@/components/waiting/WaitingResponseReceivedDialog'
 
 export default function Dashboard() {
   const supabase = createClient()
+  const thermostat = useTaskThermostat()
   const [stats, setStats] = useState({ 
     openTasks: 0, 
     highPriorityTasks: 0, 
@@ -46,6 +51,10 @@ export default function Dashboard() {
   // Smart follow-up modal state
   const [followUpTask, setFollowUpTask] = useState<Task | null>(null)
   const [isFollowUpOpen, setIsFollowUpOpen] = useState(false)
+
+  // Waiting return response received modal state
+  const [responseReceivedReturn, setResponseReceivedReturn] = useState<WaitingReturn | null>(null)
+  const [isResponseReceivedOpen, setIsResponseReceivedOpen] = useState(false)
 
   // Task form modal state
   const [isTaskFormOpen, setIsTaskFormOpen] = useState(false)
@@ -95,7 +104,7 @@ export default function Dashboard() {
     const allTasksData = (allTasksRes.data || []) as Task[]
     const activeTasks = allTasksData.filter(t => t.status !== 'fait')
     const nowDate = new Date()
-    const surchauffeTasks = activeTasks.filter(t => calculateTaskTemperature(t, nowDate).score >= 70)
+    const surchauffeTasks = activeTasks.filter(t => calculateTaskTemperature(t, nowDate, thermostat).score >= 70)
     
     // Trier les tâches actives par température décroissante pour afficher les plus brûlantes en haut
     const eventsList = (allEventsRes.data as CalendarEvent[]) || []
@@ -122,7 +131,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [thermostat.isPaused])
 
   const handleSaveTask = async (formData: TaskFormData) => {
     let finalDescription = formatTaskDescriptionWithBlocker(
@@ -142,6 +151,10 @@ export default function Dashboard() {
     }
 
     finalDescription = formatTaskDescriptionWithProject(finalDescription, formData.projectId || null)
+
+    if (formData.status === 'fait') {
+      finalDescription = formatTaskDescriptionWithClosure(finalDescription, formData.conclusion || null) || ''
+    }
 
     const { data, error } = await supabase
       .from('tasks')
@@ -260,6 +273,9 @@ export default function Dashboard() {
           <span className="font-medium">{notificationMsg}</span>
         </div>
       )}
+
+      {/* Bannière de pause du réchauffement */}
+      <ThermostatPauseBanner />
 
       {/* Stats Cards cliquables avec filtrage ciblé */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -486,8 +502,11 @@ export default function Dashboard() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => handleMarkReturnReceived(returnItem)}
-                          title="Le tiers a répondu : consigner la réponse reçue"
+                          onClick={() => {
+                            setResponseReceivedReturn(returnItem)
+                            setIsResponseReceivedOpen(true)
+                          }}
+                          title="Le tiers a répondu : consigner la réponse reçue et choisir la suite"
                           className="h-7 px-2.5 text-[11px] border-emerald-300 text-emerald-800 hover:bg-emerald-100 shrink-0 font-semibold cursor-pointer shadow-2xs"
                         >
                           ✓ Réponse reçue
@@ -652,6 +671,22 @@ export default function Dashboard() {
           return created
         }}
         onSave={handleSaveTask}
+      />
+
+      {/* Dialogue de réponse reçue et suites logiques sur retour en attente */}
+      <WaitingResponseReceivedDialog
+        open={isResponseReceivedOpen}
+        returnItem={responseReceivedReturn}
+        onClose={() => {
+          setIsResponseReceivedOpen(false)
+          setResponseReceivedReturn(null)
+        }}
+        onSuccessMessage={(msg) => showNotification(msg)}
+        onRequestCreateTask={(prefill) => {
+          setInitialFormData(prefill)
+          setIsTaskFormOpen(true)
+        }}
+        onCompleted={() => fetchData()}
       />
     </div>
   )

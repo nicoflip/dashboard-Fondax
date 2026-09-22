@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { CheckCircle2, Clock } from 'lucide-react'
 import { Task, Project } from '@/lib/types'
 import { cn, formatDate, PRIORITY_COLORS, TASK_CATEGORIES, TASK_CATEGORY_COLORS } from '@/lib/utils'
+import { parseTaskClosureComment } from '@/lib/closure-comments'
 
 interface ReportTaskListProps {
   completedTasksInPeriod: Task[]
@@ -94,6 +95,7 @@ export function ReportTaskList({
             const project = getProjectForTask(task)
             const cleanDesc = formatTaskDesc(task.description)
             const completionDate = formatDate(task.updated_at || task.created_at)
+            const closure = parseTaskClosureComment(task.description)
 
             return (
               <div
@@ -126,6 +128,16 @@ export function ReportTaskList({
                       <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">
                         {cleanDesc}
                       </p>
+                    )}
+
+                    {closure.closureComment && (
+                      <div className="mt-2 text-xs bg-emerald-50/90 border border-emerald-200/90 rounded-lg p-2.5 text-emerald-800 flex items-start gap-2">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-semibold text-emerald-900">Bilan / Conclusion : </span>
+                          <span className="text-emerald-800">{closure.closureComment}</span>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>

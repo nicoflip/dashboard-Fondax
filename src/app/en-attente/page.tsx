@@ -23,6 +23,7 @@ import { CustomDatePicker } from '@/components/ui/date-picker'
 import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
 import { formatFlexibleEventDescription } from '@/lib/flexible-events'
 import { FollowUpReturnDialog } from '@/components/waiting/FollowUpReturnDialog'
+import { WaitingResponseReceivedDialog } from '@/components/waiting/WaitingResponseReceivedDialog'
 import { 
   Hourglass, 
   Plus, 
@@ -341,38 +342,14 @@ function EnAttenteContent() {
     }
   }
 
-  // ACTION 4: Mark return as received (✓ Réponse reçue) -> UNBLOCKS TASKS!
-  const handleMarkReceived = async (returnItem: WaitingReturn) => {
-    await updateWaitingReturn(supabase, returnItem.id, {
-      status: 'reçu'
-    })
+  // Modal de réponse reçue et suites logiques
+  const [responseReceivedItem, setResponseReceivedItem] = useState<WaitingReturn | null>(null)
+  const [isResponseReceivedOpen, setIsResponseReceivedOpen] = useState(false)
 
-    const awaitingTasks = tasksAwaitingReturnMap.get(returnItem.id) || []
-
-    // Si des tâches en attente de retour externe étaient liées, les repasser en cours
-    if (awaitingTasks.length > 0) {
-      for (const t of awaitingTasks) {
-        if (t.status === 'en attente de retour externe') {
-          await supabase.from('tasks').update({
-            status: 'en cours',
-            updated_at: new Date().toISOString()
-          }).eq('id', t.id)
-        }
-      }
-    }
-
-    const reloadedReturns = await fetchWaitingReturns(supabase)
-    setWaitingReturns(reloadedReturns)
-
-    // Recharger les tâches
-    const { data: updatedTasks } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })
-    if (updatedTasks) setTasks(updatedTasks)
-
-    if (awaitingTasks.length > 0) {
-      showNotification(`✓ Réponse reçue de ${returnItem.waiting_on} ! Déblocage automatique de ${awaitingTasks.length} tâche(s) interne(s) : ${awaitingTasks.map(t => t.title).join(', ')}.`)
-    } else {
-      showNotification(`✓ Réponse reçue de ${returnItem.waiting_on} pour « ${returnItem.title} ».`)
-    }
+  // ACTION 4: Mark return as received (✓ Réponse reçue) -> Open follow-up dialog!
+  const handleMarkReceived = (returnItem: WaitingReturn) => {
+    setResponseReceivedItem(returnItem)
+    setIsResponseReceivedOpen(true)
   }
 
   // ACTION 5: Open interactive follow-up modal
@@ -1093,6 +1070,24 @@ function EnAttenteContent() {
           setFollowUpModalItem(null)
         }}
         onConfirm={handleConfirmFollowUp}
+      />
+
+      {/* Modal de réponse reçue et suites logiques */}
+      <WaitingResponseReceivedDialog
+        open={isResponseReceivedOpen}
+        returnItem={responseReceivedItem}
+        linkedTasks={responseReceivedItem ? (tasksAwaitingReturnMap.get(responseReceivedItem.id) || []) : []}
+        onClose={() => {
+          setIsResponseReceivedOpen(false)
+          setResponseReceivedItem(null)
+        }}
+        onSuccessMessage={(msg) => showNotification(msg)}
+        onCompleted={async () => {
+          const reloadedReturns = await fetchWaitingReturns(supabase)
+          setWaitingReturns(reloadedReturns)
+          const { data: updatedTasks } = await supabase.from('tasks').select('*').order('created_at', { ascending: false })
+          if (updatedTasks) setTasks(updatedTasks)
+        }}
       />
     </div>
   )

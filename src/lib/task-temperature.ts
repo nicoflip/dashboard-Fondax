@@ -1,4 +1,5 @@
 import { Task, TaskPriority, TaskStatus } from './types'
+import { getThermostatState, getPausedDurationBetween, ThermostatState } from './task-thermostat'
 
 export type TemperatureLevel = 'cold' | 'warm' | 'hot' | 'boiling'
 
@@ -9,6 +10,7 @@ export interface TaskTemperatureInfo {
   hoursInactive: number
   targetDays: number
   label: string
+  isPaused?: boolean
   color: {
     bg: string
     text: string
@@ -27,9 +29,14 @@ export const PRIORITY_TARGET_DAYS: Record<TaskPriority, number> = {
 
 /**
  * Calcule l'indice thermique (température / pourcentage d'oubli) d'une tâche.
- * Plus le temps passe sans action, plus la température augmente.
+ * Prend en compte les périodes de pause du thermostat (week-ends, cours, congés).
+ * Plus le temps actif passe sans action, plus la température augmente.
  */
-export function calculateTaskTemperature(task: Task, now: Date = new Date()): TaskTemperatureInfo {
+export function calculateTaskTemperature(
+  task: Task, 
+  now: Date = new Date(),
+  thermostat?: ThermostatState
+): TaskTemperatureInfo {
   // 1. Les tâches terminées sont éteintes
   if (task.status === 'fait') {
     return {
@@ -39,6 +46,7 @@ export function calculateTaskTemperature(task: Task, now: Date = new Date()): Ta
       hoursInactive: 0,
       targetDays: PRIORITY_TARGET_DAYS[task.priority] || 10,
       label: 'Terminée',
+      isPaused: false,
       color: {
         bg: 'bg-emerald-50',
         text: 'text-emerald-700',
@@ -49,12 +57,25 @@ export function calculateTaskTemperature(task: Task, now: Date = new Date()): Ta
     }
   }
 
-  // 2. Calcul du temps écoulé depuis la dernière action
+  // Récupération de l'état du thermostat si non fourni
+  const thermo = thermostat || getThermostatState()
+
+  // 2. Calcul du temps brut écoulé depuis la dernière action
   const refDateStr = task.updated_at || task.created_at
   const refDate = new Date(refDateStr)
-  const diffMs = Math.max(0, now.getTime() - refDate.getTime())
-  const hoursInactive = Math.floor(diffMs / (1000 * 60 * 60))
-  const daysInactive = parseFloat((diffMs / (1000 * 60 * 60 * 24)).toFixed(1))
+  const totalElapsedMs = Math.max(0, now.getTime() - refDate.getTime())
+
+  // Déduction des périodes de pause survenues depuis refDate
+  const pausedMs = getPausedDurationBetween(
+    thermo.intervals,
+    thermo.isPaused ? thermo.currentPauseStart : undefined,
+    refDate,
+    now
+  )
+  const effectiveActiveMs = Math.max(0, totalElapsedMs - pausedMs)
+
+  const hoursInactive = Math.floor(effectiveActiveMs / (1000 * 60 * 60))
+  const daysInactive = parseFloat((effectiveActiveMs / (1000 * 60 * 60 * 24)).toFixed(1))
 
   // 3. Durée cible selon la priorité
   const targetDays = PRIORITY_TARGET_DAYS[task.priority] || 10
@@ -123,6 +144,7 @@ export function calculateTaskTemperature(task: Task, now: Date = new Date()): Ta
     hoursInactive,
     targetDays,
     label,
+    isPaused: thermo.isPaused,
     color
   }
 }
@@ -130,9 +152,43 @@ export function calculateTaskTemperature(task: Task, now: Date = new Date()): Ta
 /**
  * Formate le temps d'inactivité de façon lisible pour le terrain.
  */
-export function formatInactiveTime(daysInactive: number, hoursInactive: number): string {
-  if (hoursInactive < 1) return "À l'instant"
-  if (hoursInactive < 24) return `Sans action depuis ${hoursInactive}h`
-  if (daysInactive === 1) return 'Sans action depuis 1 jour'
-  return `Sans action depuis ${Math.floor(daysInactive)} jours`
+export function formatInactiveTime(daysInactive: number, hoursInactive: number, isPaused?: boolean): string {
+  const pauseSuffix = isPaused ? ' (figé)' : ''
+  if (hoursInactive < 1) return `À l'instant${pauseSuffix}`
+  if (hoursInactive < 24) return `Sans action depuis ${hoursInactive}h${pauseSuffix}`
+  if (daysInactive === 1) return `Sans action depuis 1 jour${pauseSuffix}`
+  return `Sans action depuis ${Math.floor(daysInactive)} jours${pauseSuffix}`
+}
+
+/**
+ * Calcule la date `updated_at` nécessaire pour positionner une tâche à un pourcentage de température donné.
+ * @param task La tâche cible
+ * @param targetScore Le pourcentage souhaité (0 à 100)
+ * @param now La date de référence (par défaut `new Date()`)
+ * @returns La chaîne ISO de la nouvelle date `updated_at`
+ */
+export function calculateUpdatedAtForScore(
+  task: Task, 
+  targetScore: number, 
+  now: Date = new Date()
+): string {
+  const boundedScore = Math.min(100, Math.max(0, targetScore))
+  const targetDays = PRIORITY_TARGET_DAYS[task.priority] || 10
+
+  // Si la tâche a des multiplicateurs selon son statut, inverser le multiplicateur
+  let rawScore = boundedScore
+  if (task.status === 'en cours') {
+    // rawScore * 0.75 = score => rawScore = score / 0.75
+    rawScore = Math.min(100, boundedScore / 0.75)
+  } else if (task.status === 'en attente de retour externe') {
+    // rawScore * 0.5 = score => rawScore = score / 0.5
+    rawScore = Math.min(100, boundedScore / 0.5)
+  }
+
+  // daysInactive = (rawScore / 100) * targetDays
+  const daysInactive = (rawScore / 100) * targetDays
+  const msInactive = daysInactive * 24 * 60 * 60 * 1000
+
+  const targetDate = new Date(now.getTime() - msInactive)
+  return targetDate.toISOString()
 }

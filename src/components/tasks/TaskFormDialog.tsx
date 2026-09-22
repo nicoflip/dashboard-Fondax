@@ -21,7 +21,9 @@ import { CustomDatePicker } from '@/components/ui/date-picker'
 import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
 import { ProjectSelector } from '@/components/shared/ProjectSelector'
 import { Badge } from '@/components/ui/badge'
-import { Calendar as CalendarIcon, User, Plus, Clock, FolderKanban, Flame } from 'lucide-react'
+import { Calendar as CalendarIcon, User, Plus, Clock, FolderKanban, Flame, CheckCircle2 } from 'lucide-react'
+
+import { parseTaskClosureComment } from '@/lib/closure-comments'
 
 export interface TaskFormData {
   title: string
@@ -39,6 +41,7 @@ export interface TaskFormData {
   eventIsFlexible?: boolean
   eventFlexLabel?: string
   eventType?: EventType
+  conclusion?: string
 }
 
 interface TaskFormDialogProps {
@@ -102,13 +105,16 @@ export function TaskFormDialog({
         const blocker = parseTaskBlocker(editingTask.description)
         const returnId = extractWaitingReturnId(editingTask.description)
         const projId = extractTaskProjectId(editingTask.description)
+        const closure = parseTaskClosureComment(editingTask.description)
+        const cleanDescription = parseTaskClosureComment(blocker.cleanDescription).cleanDesc
 
         setFormData({
           title: editingTask.title,
-          description: blocker.cleanDescription,
+          description: cleanDescription,
           category: editingTask.category,
           priority: editingTask.priority,
           status: editingTask.status,
+          conclusion: closure.closureComment || '',
           blocker: {
             type: blocker.type,
             prereqTaskId: blocker.prereqTaskId || '',
@@ -282,6 +288,29 @@ export function TaskFormDialog({
             {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
+
+        {/* Conclusion / Bilan de fin si la tâche est terminée */}
+        {formData.status === 'fait' && (
+          <div className="space-y-2 bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="task-form-conclusion" className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                Conclusion & Bilan de fin (optionnel) :
+              </Label>
+              <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-semibold">
+                Visible sur le rapport
+              </span>
+            </div>
+            <Textarea
+              id="task-form-conclusion"
+              value={formData.conclusion || ''}
+              onChange={e => setFormData({ ...formData, conclusion: e.target.value })}
+              placeholder="Ex: Problème résolu en remplaçant la baie, validé avec l'équipe..."
+              rows={2}
+              className="bg-white text-xs text-slate-800 border-emerald-300 focus-visible:ring-emerald-500 placeholder:text-slate-400"
+            />
+          </div>
+        )}
 
         {/* Rattachement à un chantier IT */}
         <ProjectSelector

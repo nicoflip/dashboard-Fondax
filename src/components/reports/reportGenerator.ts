@@ -1,6 +1,6 @@
 import { Task, Project, CalendarEvent } from '@/lib/types'
 import { formatDate, EVENT_TYPE_LABELS } from '@/lib/utils'
-import { parseEventClosureComment } from '@/lib/closure-comments'
+import { parseEventClosureComment, parseTaskClosureComment } from '@/lib/closure-comments'
 
 interface GenerateMarkdownParams {
   startDate: string
@@ -50,13 +50,15 @@ export function generateMarkdownReport({
   if (completedTasksInPeriod.length === 0) {
     md += `*Aucune tâche enregistrée comme terminée sur cette période.*\n\n`
   } else {
-    md += `| Date | Priorité | Catégorie | Tâche | Chantier rattaché |\n`
+    md += `| Date | Priorité | Catégorie | Tâche & Bilan | Chantier rattaché |\n`
     md += `| :--- | :--- | :--- | :--- | :--- |\n`
     completedTasksInPeriod.forEach((t: Task) => {
       const d = formatDate(t.updated_at || t.created_at)
       const p = getProjectForTask(t)
       const pName = p ? `#${p.priority_order} ${p.name}` : 'Transversal'
-      md += `| ${d} | ${t.priority.toUpperCase()} | ${t.category} | ${t.title} | ${pName} |\n`
+      const closure = parseTaskClosureComment(t.description)
+      const conclusionText = closure.closureComment ? `<br>*Bilan : ${closure.closureComment}*` : ''
+      md += `| ${d} | ${t.priority.toUpperCase()} | ${t.category} | ${t.title}${conclusionText} | ${pName} |\n`
     })
     md += `\n`
   }
@@ -93,7 +95,8 @@ export function generateMarkdownReport({
     if (tasksCompletedInPeriod.length > 0) {
       md += `- **Réalisations sur la période :**\n`
       tasksCompletedInPeriod.forEach((t: Task) => {
-        md += `  - [x] ${t.title}\n`
+        const closure = parseTaskClosureComment(t.description)
+        md += `  - [x] ${t.title}${closure.closureComment ? ` *(Bilan : ${closure.closureComment})*` : ''}\n`
       })
     } else {
       md += `- **Réalisations sur la période :** Aucune tâche finalisée dans cet intervalle.\n`

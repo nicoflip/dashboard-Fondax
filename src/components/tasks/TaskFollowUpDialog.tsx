@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { CustomDatePicker } from '@/components/ui/date-picker'
 import { CalendarSyncOptions } from '@/components/calendar/CalendarSyncOptions'
 import { formatFlexibleEventDescription } from '@/lib/flexible-events'
+import { parseTaskClosureComment, formatTaskDescriptionWithClosure } from '@/lib/closure-comments'
 
 interface TaskFollowUpDialogProps {
   task: Task | null
@@ -28,6 +29,7 @@ interface TaskFollowUpDialogProps {
 export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRequestCreateTask }: TaskFollowUpDialogProps) {
   const supabase = createClient()
   const [selectedAction, setSelectedAction] = useState<'none' | 'calendar' | 'project' | 'next_task' | 'waiting_return'>('none')
+  const [conclusion, setConclusion] = useState('')
   
   // Projects list
   const [projects, setProjects] = useState<Project[]>([])
@@ -67,6 +69,9 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
 
   useEffect(() => {
     if (open && task) {
+      const existingClosure = parseTaskClosureComment(task.description)
+      setConclusion(existingClosure.closureComment || '')
+
       // Fetch available projects
       supabase.from('projects').select('*').order('priority_order', { ascending: true })
         .then(({ data }) => {
@@ -109,6 +114,32 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
 
   if (!task) return null
 
+  const saveTaskConclusion = async (newConclusion?: string) => {
+    if (!task) return
+    const textToSave = newConclusion !== undefined ? newConclusion : conclusion
+    const currentDesc = task.description || ''
+    const updatedDesc = formatTaskDescriptionWithClosure(currentDesc, textToSave)
+    if (updatedDesc !== currentDesc) {
+      await supabase.from('tasks').update({
+        description: updatedDesc,
+        updated_at: new Date().toISOString()
+      }).eq('id', task.id)
+    }
+  }
+
+  const handleCloseWithConclusion = async () => {
+    setSaving(true)
+    try {
+      await saveTaskConclusion()
+      if (conclusion.trim()) {
+        onSuccessMessage?.(`✓ Tâche terminée avec conclusion enregistrée !`)
+      }
+    } finally {
+      setSaving(false)
+      onClose()
+    }
+  }
+
   const handleSaveCalendar = async () => {
     if (!calTitle || !calDate) return
     setSaving(true)
@@ -123,6 +154,7 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
       finalEndDate = d.toISOString().split('T')[0]
     }
 
+    await saveTaskConclusion()
     const { error } = await supabase.from('events').insert([{
       title: calTitle,
       description: finalDesc,
@@ -152,6 +184,7 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
       return
     }
 
+    await saveTaskConclusion()
     const currentNotes = proj.notes_blockers ? `${proj.notes_blockers}\n` : ''
     const updatedNotes = `${currentNotes}${projectNoteToAdd}`
     
@@ -174,6 +207,7 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
   const handleSaveNextTask = async () => {
     if (!nextTaskTitle) return
     setSaving(true)
+    await saveTaskConclusion()
     const { error } = await supabase.from('tasks').insert([{
       title: nextTaskTitle,
       description: nextTaskDesc,
@@ -192,6 +226,7 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
     if (!waitTitle.trim() || !waitOn.trim()) return
     setSaving(true)
     try {
+      await saveTaskConclusion()
       const created = await createWaitingReturn(supabase, {
         title: waitTitle.trim(),
         waiting_on: waitOn.trim(),
@@ -241,11 +276,32 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
           <DialogTitle className="text-xl">Tâche terminée !</DialogTitle>
         </div>
         <p className="text-sm text-slate-500 mt-1">
-          Bravo, <strong className="text-slate-800">« {task.title} »</strong> est désormais terminée. Pour maintenir une organisation fluide, que souhaitez-vous déclencher ensuite ?
+          Bravo, <strong className="text-slate-800">« {task.title} »</strong> est désormais terminée. Pour maintenir une organisation fluide, vous pouvez renseigner une conclusion et déclencher une suite.
         </p>
       </DialogHeader>
 
       <div className="py-3 space-y-4 overflow-y-auto flex-1 pr-1.5 min-h-0">
+        {/* Saisie de conclusion de fin */}
+        <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="task-conclusion" className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              Conclusion & Bilan de fin (optionnel) :
+            </Label>
+            <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-semibold">
+              Visible sur le rapport
+            </span>
+          </div>
+          <Textarea
+            id="task-conclusion"
+            value={conclusion}
+            onChange={e => setConclusion(e.target.value)}
+            placeholder="Comment s'est terminée cette tâche ? (Ex: Problème résolu en remplaçant la baie, validé avec l'équipe...)"
+            rows={2}
+            className="bg-white text-xs text-slate-800 border-emerald-300 focus-visible:ring-emerald-500 placeholder:text-slate-400"
+          />
+        </div>
+
         {/* Choix des suites logiques */}
         {selectedAction === 'none' && (
           <div className="grid grid-cols-1 gap-3">
@@ -717,9 +773,20 @@ export function TaskFollowUpDialog({ task, open, onClose, onSuccessMessage, onRe
         )}
       </div>
 
-      <DialogFooter>
-        <Button variant="outline" onClick={onClose}>
-          Pas d'action nécessaire (Terminer)
+      <DialogFooter className="flex flex-col sm:flex-row gap-2 items-center justify-between w-full">
+        <span className="text-xs text-slate-500">
+          {conclusion.trim() ? "✓ Conclusion prête à être consignée" : "Aucune suite obligatoire"}
+        </span>
+        <Button 
+          variant={conclusion.trim() ? "default" : "outline"} 
+          onClick={handleCloseWithConclusion}
+          disabled={saving}
+          className={cn(
+            "cursor-pointer",
+            conclusion.trim() && "bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+          )}
+        >
+          {saving ? 'Enregistrement...' : conclusion.trim() ? 'Enregistrer la conclusion & Terminer' : "Pas d'action nécessaire (Terminer)"}
         </Button>
       </DialogFooter>
     </Dialog>

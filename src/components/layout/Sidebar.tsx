@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
+import { ThermostatBadgeButton } from '@/components/tasks/ThermostatBadgeButton'
 
 const navItems = [
   { href: '/', label: 'Tableau de bord', icon: LayoutDashboard },
@@ -102,8 +103,13 @@ export function Sidebar() {
         })}
       </nav>
 
+      {/* Badgeage / Thermostat (Pause Réchauffement) */}
+      <div className="border-t border-slate-800 pt-2 pb-1">
+        <ThermostatBadgeButton variant="sidebar" />
+      </div>
+
       {/* Logout */}
-      <div className="px-3 py-4 border-t border-slate-700">
+      <div className="px-3 py-3 border-t border-slate-800">
         <button
           onClick={handleLogout}
           className="sidebar-link sidebar-link-inactive w-full"
@@ -135,12 +141,16 @@ export function Sidebar() {
           </div>
           <span className="text-white font-semibold text-sm">Fondax IT</span>
         </Link>
-        <button
-          onClick={() => setMobileOpen(!mobileOpen)}
-          className="text-white p-1"
-        >
-          {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-        </button>
+
+        <div className="flex items-center gap-2">
+          <ThermostatBadgeButton variant="compact" />
+          <button
+            onClick={() => setMobileOpen(!mobileOpen)}
+            className="text-white p-1"
+          >
+            {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile Overlay */}

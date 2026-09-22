@@ -23,10 +23,11 @@ import {
   getTaskProject 
 } from '@/lib/projects'
 import { combineDateAndTime, normalizeTaskCategory, TASK_CATEGORIES } from '@/lib/utils'
-import { calculateTaskTemperature } from '@/lib/task-temperature'
+import { calculateTaskTemperature, calculateUpdatedAtForScore } from '@/lib/task-temperature'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import { TaskFilters, ChantierFilterMode } from '@/components/tasks/TaskFilters'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
+import { TaskCoolDownDialog } from '@/components/tasks/TaskCoolDownDialog'
 import { TaskScheduleDialog, ScheduleEventData } from '@/components/tasks/TaskScheduleDialog'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 import { TaskWaitingDialog } from '@/components/tasks/TaskWaitingDialog'
@@ -37,10 +38,14 @@ import {
   getTaskWaitingDetails 
 } from '@/lib/waiting'
 import { formatFlexibleEventDescription } from '@/lib/flexible-events'
+import { formatTaskDescriptionWithClosure } from '@/lib/closure-comments'
+import { useTaskThermostat } from '@/lib/task-thermostat'
+import { ThermostatPauseBanner } from '@/components/tasks/ThermostatPauseBanner'
 import { Plus, CheckCircle2, Flame, Hourglass } from 'lucide-react'
 
 function TasksContent() {
   const supabase = createClient()
+  const thermostat = useTaskThermostat()
   const searchParams = useSearchParams()
   const urlTab = searchParams.get('tab')
   const urlPriority = searchParams.get('priority')
@@ -76,6 +81,10 @@ function TasksContent() {
   // Dialogue de sélection du retour attendu
   const [isSelectReturnOpen, setIsSelectReturnOpen] = useState(false)
   const [taskForReturnSelect, setTaskForReturnSelect] = useState<Task | null>(null)
+
+  // Dialogue de réglage thermique personnalisé de la tâche
+  const [isCoolDownOpen, setIsCoolDownOpen] = useState(false)
+  const [coolDownTask, setCoolDownTask] = useState<Task | null>(null)
 
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null)
 
@@ -161,17 +170,26 @@ function TasksContent() {
     }
   }
 
-  // Temporiser / Refroidir la tâche (remet à zéro le compteur de chauffe)
-  const handleCoolDownTask = async (taskId: string) => {
-    const nowIso = new Date().toISOString()
+  // Ouvrir le dialogue de réglage thermique de la tâche
+  const handleOpenCoolDown = (task: Task) => {
+    setCoolDownTask(task)
+    setIsCoolDownOpen(true)
+  }
+
+  // Appliquer la nouvelle température cible choisie par l'utilisateur
+  const handleApplyCoolDown = async (taskId: string, targetScore: number) => {
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) return
+
+    const newUpdatedAt = calculateUpdatedAtForScore(task, targetScore)
     const { error } = await supabase
       .from('tasks')
-      .update({ updated_at: nowIso })
+      .update({ updated_at: newUpdatedAt })
       .eq('id', taskId)
 
     if (!error) {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, updated_at: nowIso } : t))
-      showNotification("Tâche temporisée : le compteur de chauffe a été réinitialisé.")
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, updated_at: newUpdatedAt } : t))
+      showNotification(`✓ Température de la tâche calée à ${targetScore}% avec succès !`)
     }
   }
 
@@ -330,6 +348,11 @@ function TasksContent() {
     // Rattachement au chantier IT sélectionné
     finalDescription = formatTaskDescriptionWithProject(finalDescription, formData.projectId || null)
 
+    // Conclusion de fin si la tâche est terminée
+    if (formData.status === 'fait') {
+      finalDescription = formatTaskDescriptionWithClosure(finalDescription, formData.conclusion || null) || ''
+    }
+
     if (editingTask) {
       const wasFait = editingTask.status === 'fait'
       const isNowFait = formData.status === 'fait'
@@ -451,8 +474,8 @@ function TasksContent() {
   // Nombre de tâches en surchauffe thermique (score >= 70%)
   const surchauffeCount = useMemo(() => {
     const now = new Date()
-    return tasks.filter(t => t.status !== 'fait' && calculateTaskTemperature(t, now).score >= 70).length
-  }, [tasks])
+    return tasks.filter(t => t.status !== 'fait' && calculateTaskTemperature(t, now, thermostat).score >= 70).length
+  }, [tasks, thermostat])
 
   // Counts for filter tabs and chantier isolation
   const tabCounts = useMemo(() => ({
@@ -494,11 +517,11 @@ function TasksContent() {
       // Priority / Status / Thermal filter
       if (filterPriority === 'surchauffe') {
         if (task.status === 'fait') return false
-        const temp = calculateTaskTemperature(task)
+        const temp = calculateTaskTemperature(task, new Date(), thermostat)
         if (temp.score < 70) return false
       } else if (filterPriority === 'haute') {
         if (task.priority !== 'haute' || task.status === 'fait') return false
-      } else if (filterPriority === 'moyenne') {
+        } else if (filterPriority === 'moyenne') {
         if (task.priority !== 'moyenne' || task.status === 'fait') return false
       } else if (filterPriority === 'basse') {
         if (task.priority !== 'basse' || task.status === 'fait') return false
@@ -535,7 +558,19 @@ function TasksContent() {
     })
 
     return sortTasksWithBlockers(filtered, events, waitingReturns)
-  }, [tasks, events, waitingReturns, projects, filterChantierMode, filterProject, filterCat, filterStatus, filterPriority, hideBlocked])
+  }, [
+    tasks, 
+    events, 
+    waitingReturns, 
+    projects, 
+    filterChantierMode, 
+    filterProject, 
+    filterCat, 
+    filterStatus, 
+    filterPriority, 
+    hideBlocked,
+    thermostat
+  ])
 
   const activeTasks = useMemo(() => filteredTasks.filter(t => t.status !== 'fait'), [filteredTasks])
   const doneTasks = useMemo(() => filteredTasks.filter(t => t.status === 'fait'), [filteredTasks])
@@ -547,9 +582,14 @@ function TasksContent() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tâches</h1>
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="page-header mb-1">Tâches</h1>
+          <p className="text-slate-500 text-sm">
+            Pilotez vos actions quotidiennes et la progression thermique de vos dossiers
+          </p>
+        </div>
         <Button 
           onClick={() => {
             setEditingTask(null)
@@ -570,6 +610,9 @@ function TasksContent() {
           <span className="font-medium">{notificationMsg}</span>
         </div>
       )}
+
+      {/* Bannière de pause du réchauffement */}
+      <ThermostatPauseBanner />
 
       {/* Barre de filtres et onglets */}
       <TaskFilters
@@ -695,7 +738,7 @@ function TasksContent() {
                         setTaskForReturnSelect(t)
                         setIsSelectReturnOpen(true)
                       }}
-                      onCoolDown={handleCoolDownTask}
+                      onCoolDown={handleOpenCoolDown}
                     />
                   ))}
                 </div>
@@ -740,7 +783,7 @@ function TasksContent() {
                       setTaskForReturnSelect(t)
                       setIsSelectReturnOpen(true)
                     }}
-                    onCoolDown={handleCoolDownTask}
+                    onCoolDown={handleOpenCoolDown}
                   />
                 ))}
               </div>
@@ -837,6 +880,17 @@ function TasksContent() {
         }}
         onSelectReturn={handleAssignWaitingReturn}
         onCreateAndSelectReturn={handleCreateAndAssignWaitingReturn}
+      />
+
+      {/* Dialogue de réglage thermique (refroidissement personnalisé) */}
+      <TaskCoolDownDialog
+        open={isCoolDownOpen}
+        task={coolDownTask}
+        onClose={() => {
+          setIsCoolDownOpen(false)
+          setCoolDownTask(null)
+        }}
+        onApply={handleApplyCoolDown}
       />
     </div>
   )

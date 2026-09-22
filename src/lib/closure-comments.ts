@@ -52,3 +52,10 @@ export function formatEventDescriptionWithClosure(
 
   return `${base}\n\n[CLOTURE: ${comment}]`
 }
+
+/**
+ * Aliases pour les tâches pour une sémantique claire et explicite
+ */
+export const parseTaskClosureComment = parseEventClosureComment
+export const formatTaskDescriptionWithClosure = formatEventDescriptionWithClosure
+
