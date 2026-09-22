@@ -23,6 +23,7 @@ import {
   getTaskProject 
 } from '@/lib/projects'
 import { combineDateAndTime, normalizeTaskCategory, TASK_CATEGORIES } from '@/lib/utils'
+import { calculateTaskTemperature } from '@/lib/task-temperature'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import { TaskFilters, ChantierFilterMode } from '@/components/tasks/TaskFilters'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
@@ -100,7 +101,9 @@ function TasksContent() {
 
   // Sync priority from URL query parameters
   useEffect(() => {
-    if (urlTab === 'urgentes' || urlPriority === 'haute') {
+    if (urlTab === 'surchauffe' || urlTab === 'urgentes') {
+      setFilterPriority('surchauffe')
+    } else if (urlPriority === 'haute') {
       setFilterPriority('haute')
     } else if (urlTab === 'a-traiter' || urlTab === 'toutes') {
       setFilterPriority('all')
@@ -155,6 +158,20 @@ function TasksContent() {
           setIsFollowUpOpen(true)
         }
       }
+    }
+  }
+
+  // Temporiser / Refroidir la tâche (remet à zéro le compteur de chauffe)
+  const handleCoolDownTask = async (taskId: string) => {
+    const nowIso = new Date().toISOString()
+    const { error } = await supabase
+      .from('tasks')
+      .update({ updated_at: nowIso })
+      .eq('id', taskId)
+
+    if (!error) {
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, updated_at: nowIso } : t))
+      showNotification("Tâche temporisée : le compteur de chauffe a été réinitialisé.")
     }
   }
 
@@ -431,9 +448,16 @@ function TasksContent() {
     }).length
   }, [waitingTasks])
 
+  // Nombre de tâches en surchauffe thermique (score >= 70%)
+  const surchauffeCount = useMemo(() => {
+    const now = new Date()
+    return tasks.filter(t => t.status !== 'fait' && calculateTaskTemperature(t, now).score >= 70).length
+  }, [tasks])
+
   // Counts for filter tabs and chantier isolation
   const tabCounts = useMemo(() => ({
-    urgentes: tasks.filter(t => t.priority === 'haute' && t.status !== 'fait').length,
+    surchauffe: surchauffeCount,
+    urgentes: surchauffeCount,
     aTraiter: tasks.filter(t => ['à faire', 'en cours'].includes(t.status)).length,
     enAttente: waitingTasks.length,
     waitingDueCount,
@@ -441,7 +465,7 @@ function TasksContent() {
     toutes: tasks.length,
     withChantier: tasks.filter(t => isTaskLinkedToChantier(t, projects)).length,
     withoutChantier: tasks.filter(t => !isTaskLinkedToChantier(t, projects)).length
-  }), [tasks, waitingTasks, waitingDueCount, projects])
+  }), [tasks, waitingTasks, waitingDueCount, projects, surchauffeCount])
 
   // Counts by category
   const categoryCounts = useMemo(() => {
@@ -467,8 +491,12 @@ function TasksContent() {
   // Filtered & sorted tasks
   const filteredTasks = useMemo(() => {
     const filtered = tasks.filter(task => {
-      // Priority / Status filter
-      if (filterPriority === 'haute') {
+      // Priority / Status / Thermal filter
+      if (filterPriority === 'surchauffe') {
+        if (task.status === 'fait') return false
+        const temp = calculateTaskTemperature(task)
+        if (temp.score < 70) return false
+      } else if (filterPriority === 'haute') {
         if (task.priority !== 'haute' || task.status === 'fait') return false
       } else if (filterPriority === 'moyenne') {
         if (task.priority !== 'moyenne' || task.status === 'fait') return false
@@ -621,6 +649,9 @@ function TasksContent() {
               💡 Le sujet « {filterCat} » est sélectionné ({categoryCounts[filterCat] || 0} tâche(s) au total).
             </p>
           )}
+          {filterPriority === 'surchauffe' && (
+            <p className="text-xs text-slate-400 mt-1">Excellente nouvelle ! Aucune tâche en surchauffe (≥ 70%) actuellement.</p>
+          )}
           {filterPriority === 'haute' && (
             <p className="text-xs text-slate-400 mt-1">Bonne nouvelle ! Aucune tâche prioritaire haute en attente.</p>
           )}
@@ -664,6 +695,7 @@ function TasksContent() {
                         setTaskForReturnSelect(t)
                         setIsSelectReturnOpen(true)
                       }}
+                      onCoolDown={handleCoolDownTask}
                     />
                   ))}
                 </div>
@@ -708,6 +740,7 @@ function TasksContent() {
                       setTaskForReturnSelect(t)
                       setIsSelectReturnOpen(true)
                     }}
+                    onCoolDown={handleCoolDownTask}
                   />
                 ))}
               </div>

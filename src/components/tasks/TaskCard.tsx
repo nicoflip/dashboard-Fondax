@@ -32,8 +32,11 @@ import {
   Lock, 
   Unlock,
   User,
-  FolderKanban
+  FolderKanban,
+  Thermometer,
+  Snowflake
 } from 'lucide-react'
+import { calculateTaskTemperature, formatInactiveTime } from '@/lib/task-temperature'
 
 interface TaskCardProps {
   task: Task
@@ -46,6 +49,7 @@ interface TaskCardProps {
   onSchedule: (task: Task) => void
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void
   onManageWaiting?: (task: Task) => void
+  onCoolDown?: (taskId: string) => void
 }
 
 export function TaskCard({
@@ -58,13 +62,15 @@ export function TaskCard({
   onDelete,
   onSchedule,
   onStatusChange,
-  onManageWaiting
+  onManageWaiting,
+  onCoolDown
 }: TaskCardProps) {
   const isAttente = task.status === 'en attente de retour externe'
   const isFait = task.status === 'fait'
   const isEnCours = task.status === 'en cours'
   const isHighPrio = task.priority === 'haute'
-  const isUrgent = isHighPrio && !isFait
+  const tempInfo = calculateTaskTemperature(task)
+  const isUrgent = tempInfo.score >= 70 && !isFait
 
   // Normaliser la catégorie et trouver la couleur thématique
   const normalizedCategory = normalizeTaskCategory(task.category)
@@ -123,7 +129,25 @@ export function TaskCard({
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {isFait && <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />}
-            {isUrgent && !isBlocked && <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-pulse" />}
+            {!isFait && !isBlocked && (
+              tempInfo.level === 'boiling' ? (
+                <span title={`Surchauffe critique (${tempInfo.score}%) : ${formatInactiveTime(tempInfo.daysInactive, tempInfo.hoursInactive)}`}>
+                  <Flame className="w-5 h-5 text-red-600 fill-red-500 shrink-0 animate-pulse" />
+                </span>
+              ) : tempInfo.level === 'hot' ? (
+                <span title={`Tâche chaude (${tempInfo.score}%) : ${formatInactiveTime(tempInfo.daysInactive, tempInfo.hoursInactive)}`}>
+                  <Flame className="w-5 h-5 text-orange-500 fill-orange-400 shrink-0" />
+                </span>
+              ) : tempInfo.level === 'warm' ? (
+                <span title={`Tâche tiède (${tempInfo.score}%) : ${formatInactiveTime(tempInfo.daysInactive, tempInfo.hoursInactive)}`}>
+                  <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                </span>
+              ) : (
+                <span title={`Tâche fraîche (${tempInfo.score}%) : ${formatInactiveTime(tempInfo.daysInactive, tempInfo.hoursInactive)}`}>
+                  <Thermometer className="w-4 h-4 text-blue-500 shrink-0" />
+                </span>
+              )
+            )}
             {isBlocked && (
               blocker.type === 'date' ? (
                 <span title="Bloquée jusqu'à une date"><Lock className="w-4 h-4 text-amber-600 shrink-0" /></span>
@@ -138,7 +162,7 @@ export function TaskCard({
             <CardTitle 
               className={cn(
                 "cursor-pointer text-lg hover:text-blue-600 hover:underline truncate",
-                isUrgent && !isBlocked && "font-bold text-slate-900",
+                tempInfo.score >= 70 && !isBlocked && !isFait && "font-bold text-slate-900",
                 isFait && "line-through text-slate-400 font-normal",
                 isBlocked && "text-slate-600 font-medium"
               )}
@@ -357,6 +381,44 @@ export function TaskCard({
             return <span className="text-slate-700 font-medium">{cleaned}</span>
           })()}
         </CardDescription>
+
+        {!isFait && (
+          <div className="mt-3 pt-2.5 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500 font-medium flex items-center gap-1.5">
+                <Thermometer className="w-3.5 h-3.5 text-slate-400" />
+                {formatInactiveTime(tempInfo.daysInactive, tempInfo.hoursInactive)}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className={cn(
+                  "font-bold px-2 py-0.5 rounded-full text-[11px] flex items-center gap-1 border",
+                  tempInfo.color.badge
+                )}>
+                  {tempInfo.level === 'boiling' && <Flame className="w-3 h-3 fill-amber-300 text-amber-300 animate-pulse" />}
+                  {tempInfo.level === 'hot' && <Flame className="w-3 h-3 fill-orange-200 text-white" />}
+                  <span>{tempInfo.score}%</span>
+                  <span className="text-[10px] font-normal opacity-90">({tempInfo.label})</span>
+                </span>
+                {onCoolDown && tempInfo.score >= 30 && (
+                  <button
+                    type="button"
+                    onClick={() => onCoolDown(task.id)}
+                    title="Temporiser / Refroidir : Réinitialise le compteur de chauffe à zéro"
+                    className="text-slate-400 hover:text-sky-600 hover:bg-sky-50 border border-slate-200 hover:border-sky-200 p-1 rounded-md transition-all cursor-pointer shadow-2xs"
+                  >
+                    <Snowflake className="w-3.5 h-3.5 text-sky-500" />
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+              <div 
+                className={cn("h-full rounded-full transition-all duration-300", tempInfo.color.progress)} 
+                style={{ width: `${tempInfo.score}%` }} 
+              />
+            </div>
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="mt-auto pb-4 space-y-3">
@@ -392,18 +454,26 @@ export function TaskCard({
             <span>{theme.emoji}</span>
             <span>{normalizedCategory}</span>
           </Badge>
-          {isUrgent ? (
-            <Badge className="bg-red-600 text-white font-black flex items-center gap-1 shadow-xs border-red-700">
+
+          {/* Rythme / Enjeu */}
+          <Badge 
+            variant="outline"
+            className={cn(
+              "text-xs font-semibold border flex items-center gap-1",
+              PRIORITY_COLORS[task.priority],
+              isFait && "opacity-60"
+            )}
+            title={`Rythme de chauffe : 100% en ${tempInfo.targetDays} jours`}
+          >
+            {task.priority === 'haute' ? '⚡ Express (3j)' : task.priority === 'moyenne' ? 'Standard (10j)' : 'Fond (30j)'}
+          </Badge>
+
+          {/* Badge d'alerte en surchauffe si score >= 70 */}
+          {!isFait && tempInfo.score >= 70 && (
+            <Badge className="bg-red-600 text-white font-black flex items-center gap-1 shadow-xs border-red-700 animate-pulse">
               <Flame className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-              Haute priorité (Urgent)
+              Surchauffe {tempInfo.score}%
             </Badge>
-          ) : isHighPrio ? (
-            <Badge className={cn("bg-red-100 text-red-700 border-red-200 flex items-center gap-1", isFait && "opacity-60")}>
-              <Flame className="w-3 h-3" />
-              Haute
-            </Badge>
-          ) : (
-            <Badge className={cn(PRIORITY_COLORS[task.priority], isFait && "opacity-60")}>{task.priority}</Badge>
           )}
         </div>
       </CardContent>

@@ -10,6 +10,7 @@ import { cn, formatEventDateTime } from '@/lib/utils'
 import { parseFlexibleEvent } from '@/lib/flexible-events'
 import { parseEventClosureComment } from '@/lib/closure-comments'
 import { EVENT_TYPE_CONFIG } from './calendar-utils'
+import { calculateTaskTemperature } from '@/lib/task-temperature'
 
 interface CalendarAgendaViewProps {
   agendaGroups: {
@@ -67,7 +68,8 @@ export function CalendarAgendaView({
                 const parsed = parseFlexibleEvent(closure.cleanDesc)
                 const linkedTask = tasks.find(t => t.id === event.task_id)
                 const linkedVendor = vendors.find(v => v.id === event.vendor_id)
-                const isUrgent = linkedTask?.priority === 'haute'
+                const linkedTemp = linkedTask ? calculateTaskTemperature(linkedTask) : null
+                const isUrgent = linkedTemp ? linkedTemp.score >= 70 : false
                 const isClosed = event.status === 'clos'
 
                 return (
@@ -144,8 +146,8 @@ export function CalendarAgendaView({
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {linkedTask && (
-                            <Badge variant="outline" className={cn("text-[10px]", isUrgent ? "bg-red-50 text-red-700 border-red-200" : "bg-blue-50 text-blue-700 border-blue-200")}>
-                              {isUrgent ? '🔥 Tâche urgente' : 'Tâche'} : {linkedTask.title}
+                            <Badge variant="outline" className={cn("text-[10px]", isUrgent ? "bg-red-50 text-red-700 border-red-200 font-bold" : "bg-blue-50 text-blue-700 border-blue-200")}>
+                              {isUrgent ? `🔥 Surchauffe (${linkedTemp?.score}%)` : 'Tâche'} : {linkedTask.title}
                             </Badge>
                           )}
                           {linkedVendor && (

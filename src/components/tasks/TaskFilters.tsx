@@ -8,14 +8,15 @@ import {
   TASK_PRIORITIES,
   TASK_CATEGORY_THEMES 
 } from '@/lib/utils'
-import { Flame, Hourglass, FolderKanban, Layers, X, CheckCircle2 } from 'lucide-react'
+import { Flame, Hourglass, FolderKanban, Layers, X, CheckCircle2, Thermometer } from 'lucide-react'
 import { Project } from '@/lib/types'
 
 export type ChantierFilterMode = 'all' | 'with_chantier' | 'without_chantier'
 
 interface TaskFiltersProps {
   counts: {
-    urgentes: number
+    surchauffe?: number
+    urgentes?: number
     aTraiter: number
     enAttente: number
     waitingDueCount?: number
@@ -337,30 +338,54 @@ export function TaskFilters({
               )}
             </button>
 
-            {/* Haute (Urgente) */}
+            {/* En surchauffe (≥ 70%) */}
+            <button
+              type="button"
+              onClick={() => onFilterPriorityChange(filterPriority === 'surchauffe' ? 'all' : 'surchauffe')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border shadow-2xs flex items-center gap-1.5",
+                filterPriority === 'surchauffe'
+                  ? "bg-red-600 text-white border-red-700 ring-2 ring-red-400/50 scale-105 shadow-xs"
+                  : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100 hover:scale-102"
+              )}
+            >
+              <Flame className={cn("w-3.5 h-3.5 shrink-0", filterPriority === 'surchauffe' ? "fill-amber-300 text-amber-300 animate-pulse" : "fill-red-400 text-red-500")} />
+              <span>En surchauffe (≥ 70%)</span>
+              {counts.surchauffe !== undefined && (
+                <span className={cn(
+                  "px-1.5 py-0.2 rounded-full text-[10px] font-black",
+                  filterPriority === 'surchauffe' ? "bg-red-800 text-white" : "bg-red-200 text-red-900"
+                )}>
+                  {counts.surchauffe}
+                </span>
+              )}
+            </button>
+
+            {/* Express (3j) / Haute */}
             <button
               type="button"
               onClick={() => onFilterPriorityChange(filterPriority === 'haute' ? 'all' : 'haute')}
               className={cn(
                 "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer border shadow-2xs flex items-center gap-1.5",
                 filterPriority === 'haute'
-                  ? "bg-red-600 text-white border-red-700 ring-2 ring-red-400/50 scale-105 shadow-xs"
-                  : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100 hover:scale-102"
+                  ? "bg-rose-700 text-white border-rose-800 ring-2 ring-rose-400/50 scale-105 shadow-xs"
+                  : "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100 hover:scale-102"
               )}
+              title="Rythme express : ébullition en 3 jours"
             >
-              <Flame className={cn("w-3.5 h-3.5 shrink-0", filterPriority === 'haute' ? "fill-amber-300 text-amber-300 animate-pulse" : "fill-red-400 text-red-500")} />
-              <span>Haute (Urgente)</span>
+              <span>⚡</span>
+              <span>Express (3j)</span>
               {priorityCounts?.haute !== undefined && (
                 <span className={cn(
                   "px-1.5 py-0.2 rounded-full text-[10px] font-black",
-                  filterPriority === 'haute' ? "bg-red-800 text-white" : "bg-red-200 text-red-900"
+                  filterPriority === 'haute' ? "bg-rose-900 text-white" : "bg-rose-200 text-rose-900"
                 )}>
                   {priorityCounts.haute}
                 </span>
               )}
             </button>
 
-            {/* Moyenne */}
+            {/* Standard (10j) / Moyenne */}
             <button
               type="button"
               onClick={() => onFilterPriorityChange(filterPriority === 'moyenne' ? 'all' : 'moyenne')}
@@ -370,9 +395,9 @@ export function TaskFilters({
                   ? "bg-amber-600 text-white border-amber-700 ring-2 ring-amber-400/50 scale-105 shadow-xs"
                   : "bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100 hover:scale-102"
               )}
+              title="Rythme standard : ébullition en 10 jours"
             >
-              <span>⚡</span>
-              <span>Moyenne</span>
+              <span>Standard (10j)</span>
               {priorityCounts?.moyenne !== undefined && (
                 <span className={cn(
                   "px-1.5 py-0.2 rounded-full text-[10px] font-black",
@@ -383,7 +408,7 @@ export function TaskFilters({
               )}
             </button>
 
-            {/* Basse */}
+            {/* Fond (30j) / Basse */}
             <button
               type="button"
               onClick={() => onFilterPriorityChange(filterPriority === 'basse' ? 'all' : 'basse')}
@@ -393,9 +418,10 @@ export function TaskFilters({
                   ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-400/50 scale-105 shadow-xs"
                   : "bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100 hover:scale-102"
               )}
+              title="Rythme tâche de fond : ébullition en 30 jours"
             >
               <span>🌱</span>
-              <span>Basse</span>
+              <span>Fond (30j)</span>
               {priorityCounts?.basse !== undefined && (
                 <span className={cn(
                   "px-1.5 py-0.2 rounded-full text-[10px] font-black",

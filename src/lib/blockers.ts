@@ -1,4 +1,5 @@
 import { Task, CalendarEvent, TaskStatus, TaskBlockerInfo, BlockerConfig, TaskBlockedStatus, WaitingReturn } from './types'
+import { calculateTaskTemperature } from './task-temperature'
 
 /**
  * Extrait les métadonnées de dépendance/blocage d'une tâche à partir de sa description textuelle.
@@ -170,8 +171,9 @@ export function checkTaskBlocked(
  * Trie une liste de tâches intelligemment :
  * 1. Tâches terminées tout en bas
  * 2. Tâches bloquées après les tâches prêtes à être exécutées
- * 3. Tâches prêtes ordonnées par priorité (haute > moyenne > basse)
- * 4. Plus récentes d'abord en cas d'égalité
+ * 3. Tâches prêtes ordonnées par indice thermique décroissant (les tâches en surchauffe / qui traînent remontent en haut)
+ * 4. En cas d'égalité thermique, priorité (haute > moyenne > basse)
+ * 5. Plus anciennes d'abord en dernier recours pour ne rien laisser traîner
  */
 export function sortTasksWithBlockers(
   tasks: Task[],
@@ -179,6 +181,7 @@ export function sortTasksWithBlockers(
   allWaitingReturns: WaitingReturn[] = []
 ): Task[] {
   const prioOrder: Record<string, number> = { haute: 1, moyenne: 2, basse: 3 }
+  const now = new Date()
 
   return [...tasks].sort((a, b) => {
     // 1. Terminées tout en bas
@@ -195,12 +198,17 @@ export function sortTasksWithBlockers(
       if (!blockedA && blockedB) return -1
     }
 
-    // 3. Tri par priorité
+    // 3. Tri par température / indice de latence décroissant (les plus chaudes en haut)
+    const tempA = calculateTaskTemperature(a, now).score
+    const tempB = calculateTaskTemperature(b, now).score
+    if (tempA !== tempB) return tempB - tempA
+
+    // 4. Tri secondaire par priorité nominale
     const orderA = prioOrder[a.priority] || 99
     const orderB = prioOrder[b.priority] || 99
     if (orderA !== orderB) return orderA - orderB
 
-    // 4. Tri par date de création décroissante
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    // 5. En cas d'égalité absolue, les plus anciennes d'abord (pour éviter d'enterrer)
+    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   })
 }

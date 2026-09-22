@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate, formatEventDateTime, combineDateAndTime } from '@/lib/utils'
-import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban, Hourglass, Plus } from 'lucide-react'
+import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban, Hourglass, Plus, Thermometer } from 'lucide-react'
 import { Task, Project, CalendarEvent, WaitingReturn } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
@@ -19,9 +19,10 @@ import {
   formatTaskWithWaitingReturn,
   createWaitingReturn
 } from '@/lib/waiting-returns'
-import { formatTaskDescriptionWithBlocker } from '@/lib/blockers'
+import { formatTaskDescriptionWithBlocker, sortTasksWithBlockers } from '@/lib/blockers'
 import { formatTaskDescriptionWithProject } from '@/lib/projects'
 import { removeWaitingTag } from '@/lib/waiting'
+import { calculateTaskTemperature, formatInactiveTime } from '@/lib/task-temperature'
 
 export default function Dashboard() {
   const supabase = createClient()
@@ -63,10 +64,8 @@ export default function Dashboard() {
     
     const [
       openTasksRes,
-      highPriorityCountRes,
       activeProjectsRes,
       upcomingEventsRes,
-      topTasksRes,
       eventsRes,
       returnsRes,
       allProjectsRes,
@@ -74,10 +73,8 @@ export default function Dashboard() {
       allEventsRes
     ] = await Promise.all([
       supabase.from('tasks').select('*', { count: 'exact', head: true }).neq('status', 'fait'),
-      supabase.from('tasks').select('*', { count: 'exact', head: true }).eq('priority', 'haute').neq('status', 'fait'),
       supabase.from('projects').select('*', { count: 'exact', head: true }).eq('status', 'EN COURS'),
       supabase.from('events').select('*', { count: 'exact', head: true }).eq('status', 'à venir'),
-      supabase.from('tasks').select('*').eq('priority', 'haute').neq('status', 'fait').order('created_at', { ascending: false }).limit(5),
       supabase.from('events').select('*').neq('status', 'clos').neq('status', 'passé').gte('event_date', now).order('event_date', { ascending: true }).limit(5),
       fetchWaitingReturns(supabase),
       supabase.from('projects').select('*').order('priority_order', { ascending: true }),
@@ -95,9 +92,18 @@ export default function Dashboard() {
       return metrics.isDragging
     }).length
 
+    const allTasksData = (allTasksRes.data || []) as Task[]
+    const activeTasks = allTasksData.filter(t => t.status !== 'fait')
+    const nowDate = new Date()
+    const surchauffeTasks = activeTasks.filter(t => calculateTaskTemperature(t, nowDate).score >= 70)
+    
+    // Trier les tâches actives par température décroissante pour afficher les plus brûlantes en haut
+    const eventsList = (allEventsRes.data as CalendarEvent[]) || []
+    const sortedHottest = sortTasksWithBlockers(activeTasks, eventsList, activeReturns).slice(0, 5)
+
     setStats({
       openTasks: openTasksRes.count || 0,
-      highPriorityTasks: highPriorityCountRes.count || 0,
+      highPriorityTasks: surchauffeTasks.length,
       waitingTasksCount: activeReturns.length,
       waitingDueCount,
       draggingCount,
@@ -105,12 +111,12 @@ export default function Dashboard() {
       upcomingEvents: upcomingEventsRes.count || 0
     })
 
-    if (topTasksRes.data) setHighPriorityTasks(topTasksRes.data)
-    if (allTasksRes.data) setAllTasks(allTasksRes.data)
+    setHighPriorityTasks(sortedHottest)
+    setAllTasks(allTasksData)
     if (allProjectsRes.data) setProjectsList(allProjectsRes.data)
     setWaitingReturnsList(activeReturns)
     if (eventsRes.data) setUpcomingEventsList(eventsRes.data)
-    if (allEventsRes.data) setAllEvents(allEventsRes.data as CalendarEvent[])
+    setAllEvents(eventsList)
     setLoading(false)
   }
 
@@ -271,7 +277,7 @@ export default function Dashboard() {
           </Card>
         </Link>
         
-        <Link href="/taches?tab=urgentes" className="block group" title="Voir uniquement les tâches urgentes / priorité haute">
+        <Link href="/taches?tab=surchauffe" className="block group" title="Voir les tâches en surchauffe thermique (≥ 70%)">
           <Card className="transition-all duration-200 border-red-200 group-hover:border-red-500 group-hover:shadow-md cursor-pointer h-full bg-red-50/20">
             <CardContent className="flex items-center gap-3.5 p-5">
               <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-red-100 text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors shrink-0">
@@ -279,8 +285,8 @@ export default function Dashboard() {
               </div>
               <div>
                 <div className="flex items-center gap-1">
-                  <p className="text-xs font-bold text-red-600">Priorité haute</p>
-                  <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.2 rounded uppercase">Urgent</span>
+                  <p className="text-xs font-bold text-red-600">En surchauffe</p>
+                  <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.2 rounded uppercase">≥ 70%</span>
                 </div>
                 <h2 className="text-2xl font-bold text-red-700">{stats.highPriorityTasks}</h2>
               </div>
@@ -351,44 +357,61 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-red-700 text-base font-bold">
                   <Flame className="h-5 w-5 fill-red-500 text-red-600 animate-pulse" />
-                  Actions prioritaires ({highPriorityTasks.length})
+                  Tâches en surchauffe & prioritaires ({highPriorityTasks.length})
                 </CardTitle>
                 <Link 
-                  href="/taches?tab=urgentes" 
+                  href="/taches?tab=surchauffe" 
                   className="text-xs font-bold text-red-600 hover:text-red-800 hover:underline flex items-center gap-1"
                 >
-                  Filtrer les urgences &rarr;
+                  Filtrer la surchauffe &rarr;
                 </Link>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
               {highPriorityTasks.length === 0 ? (
-                <p className="text-sm text-slate-500">Aucune action prioritaire en attente.</p>
+                <p className="text-sm text-slate-500">Aucune tâche en surchauffe en attente.</p>
               ) : (
-                highPriorityTasks.map(task => (
-                  <div key={task.id} className="flex items-start justify-between rounded-lg border border-red-200 border-l-[5px] border-l-red-600 bg-red-50/40 p-3.5 shadow-xs transition-colors hover:bg-red-50/70">
-                    <div className="space-y-1.5 flex-1 min-w-0 pr-2">
-                      <div className="flex items-center gap-2">
-                        <span className="inline-flex items-center gap-1 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-sm shadow-xs uppercase tracking-wider shrink-0">
-                          <Flame className="w-3 h-3 fill-amber-300 text-amber-300" /> URGENT
-                        </span>
-                        <h4 className="font-bold text-slate-950 text-sm truncate" title={task.title}>{task.title}</h4>
+                highPriorityTasks.map(task => {
+                  const temp = calculateTaskTemperature(task)
+                  return (
+                    <div key={task.id} className="flex flex-col gap-2 rounded-lg border border-red-200 border-l-[5px] border-l-red-600 bg-red-50/40 p-3.5 shadow-xs transition-colors hover:bg-red-50/70">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="space-y-1.5 flex-1 min-w-0 pr-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={cn(
+                              "inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-sm shadow-xs uppercase tracking-wider shrink-0",
+                              temp.color.badge
+                            )}>
+                              <Flame className="w-3 h-3 fill-amber-300 text-amber-300" /> {temp.score}%
+                            </span>
+                            <h4 className="font-bold text-slate-950 text-sm truncate" title={task.title}>{task.title}</h4>
+                          </div>
+                          <div className="flex items-center gap-2 flex-wrap pt-0.5">
+                            <Badge variant="outline" className="text-xs border-red-200 bg-white text-slate-700">{task.category}</Badge>
+                            <Badge className={cn("text-xs font-semibold", STATUS_COLORS[task.status])}>{task.status}</Badge>
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              {formatInactiveTime(temp.daysInactive, temp.hoursInactive)}
+                            </span>
+                          </div>
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="shrink-0 font-medium hover:bg-red-100 border-red-200 text-red-900 cursor-pointer"
+                          onClick={() => toggleTaskStatus(task)}
+                        >
+                          {task.status === 'en cours' ? 'Terminer' : 'Reprendre'}
+                        </Button>
                       </div>
-                      <div className="flex gap-2">
-                        <Badge variant="outline" className="text-xs border-red-200 bg-white text-slate-700">{task.category}</Badge>
-                        <Badge className={cn("text-xs font-semibold", STATUS_COLORS[task.status])}>{task.status}</Badge>
+                      <div className="w-full bg-slate-200/70 rounded-full h-1.5 overflow-hidden">
+                        <div 
+                          className={cn("h-full rounded-full transition-all", temp.color.progress)} 
+                          style={{ width: `${temp.score}%` }} 
+                        />
                       </div>
                     </div>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="shrink-0 font-medium hover:bg-red-100 border-red-200 text-red-900 cursor-pointer"
-                      onClick={() => toggleTaskStatus(task)}
-                    >
-                      {task.status === 'en cours' ? 'Terminer' : 'Reprendre'}
-                    </Button>
-                  </div>
-                ))
+                  )
+                })
               )}
             </CardContent>
           </Card>

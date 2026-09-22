@@ -212,48 +212,51 @@ export function TaskFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Priorité</Label>
+            <Label>Rythme de traitement (Enjeu)</Label>
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 onClick={() => setFormData({ ...formData, priority: 'haute' })}
                 className={cn(
-                  "py-2 px-2.5 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                  "py-2 px-2 rounded-lg text-xs font-bold border transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer",
                   formData.priority === 'haute'
-                    ? "bg-red-600 text-white border-red-700 ring-2 ring-red-400/50 shadow-xs scale-102"
-                    : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                    ? "bg-rose-700 text-white border-rose-800 ring-2 ring-rose-400/50 shadow-xs scale-102"
+                    : "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100"
                 )}
+                title="Critique / Express : ébullition en 3 jours sans action"
               >
-                <Flame className="w-3.5 h-3.5 fill-red-400" />
-                <span>Haute</span>
+                <span className="flex items-center gap-1">⚡ Express</span>
+                <span className="text-[10px] font-normal opacity-90">3 jours max</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setFormData({ ...formData, priority: 'moyenne' })}
                 className={cn(
-                  "py-2 px-2.5 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                  "py-2 px-2 rounded-lg text-xs font-bold border transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer",
                   formData.priority === 'moyenne'
                     ? "bg-amber-600 text-white border-amber-700 ring-2 ring-amber-400/50 shadow-xs scale-102"
                     : "bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100"
                 )}
+                title="Standard : ébullition en 10 jours sans action"
               >
-                <span>⚡</span>
-                <span>Moyenne</span>
+                <span className="flex items-center gap-1">Standard</span>
+                <span className="text-[10px] font-normal opacity-90">10 jours max</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setFormData({ ...formData, priority: 'basse' })}
                 className={cn(
-                  "py-2 px-2.5 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-1.5 cursor-pointer",
+                  "py-2 px-2 rounded-lg text-xs font-bold border transition-all flex flex-col items-center justify-center gap-0.5 cursor-pointer",
                   formData.priority === 'basse'
                     ? "bg-blue-600 text-white border-blue-700 ring-2 ring-blue-400/50 shadow-xs scale-102"
                     : "bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100"
                 )}
+                title="Tâche de fond : ébullition en 30 jours sans action"
               >
-                <span>🌱</span>
-                <span>Basse</span>
+                <span className="flex items-center gap-1">🌱 Fond</span>
+                <span className="text-[10px] font-normal opacity-90">30 jours max</span>
               </button>
             </div>
           </div>
