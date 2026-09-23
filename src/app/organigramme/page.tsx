@@ -25,6 +25,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogContent, DialogFooter } from '
 import { Badge } from '@/components/ui/badge'
 import { Plus, User, CheckSquare, Square, Trash2, Edit2, ShieldAlert, Link2, GitFork } from 'lucide-react'
 import { Person } from '@/lib/types'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 const DEPARTMENTS = [
   'Direction',
@@ -113,6 +114,7 @@ const nodeTypes = {
 
 export default function OrganigrammePage() {
   const supabase = createClient()
+  const confirm = useConfirm()
   const [mounted, setMounted] = useState(false)
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -295,7 +297,13 @@ export default function OrganigrammePage() {
 
   const handleSavePerson = async () => {
     if (!formData.name?.trim()) {
-      alert('Veuillez renseigner le nom du collaborateur.')
+      await confirm({
+        title: 'Information manquante',
+        message: 'Veuillez renseigner le nom du collaborateur pour pouvoir enregistrer.',
+        variant: 'warning',
+        confirmText: 'Compris',
+        cancelText: 'Fermer',
+      })
       return
     }
 
@@ -359,11 +367,16 @@ export default function OrganigrammePage() {
   // Only the deleted person and edges directly attached to this person are removed.
   // All other edges in the company remain 100% untouched!
   const handleDeletePerson = async (id: string, name?: string) => {
-    const confirmMsg = name 
-      ? `Confirmez-vous la suppression définitive de ${name} de l'organigramme ?`
-      : 'Voulez-vous vraiment supprimer ce collaborateur ?'
-
-    if (!window.confirm(confirmMsg)) return
+    const ok = await confirm({
+      title: 'Supprimer le collaborateur',
+      itemTitle: name,
+      message: name 
+        ? `Confirmez-vous la suppression définitive de ${name} de l'organigramme ? Cette action est irréversible.`
+        : 'Voulez-vous vraiment supprimer ce collaborateur de l\'organigramme ? Cette action est irréversible.',
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
 
     // 1. Delete in Supabase
     await supabase.from('people').delete().eq('id', id)
@@ -419,13 +432,20 @@ export default function OrganigrammePage() {
   }, [setEdges, supabase])
 
   // Click on a link to inspect or delete that specific hierarchical link
-  const onEdgeClick = useCallback((event: any, edge: Edge) => {
+  const onEdgeClick = useCallback(async (event: any, edge: Edge) => {
     const sourcePerson = people.find(p => p.id === edge.source)
     const targetPerson = people.find(p => p.id === edge.target)
     const sourceName = sourcePerson?.name || 'Responsable'
     const targetName = targetPerson?.name || 'Collaborateur'
 
-    if (!window.confirm(`Supprimer le lien hiérarchique entre "${sourceName}" et "${targetName}" ?`)) return
+    const ok = await confirm({
+      title: 'Supprimer le lien hiérarchique',
+      itemTitle: `${sourceName} → ${targetName}`,
+      message: `Voulez-vous supprimer le lien hiérarchique entre "${sourceName}" et "${targetName}" ?`,
+      confirmText: 'Supprimer le lien',
+      variant: 'danger',
+    })
+    if (!ok) return
 
     // Remove only this specific edge
     setEdges(eds => eds.filter(e => e.id !== edge.id))

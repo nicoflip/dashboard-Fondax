@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Project, Task, CalendarEvent, ProjectStatus, TaskPriority, TaskStatus, WaitingReturn } from '@/lib/types'
 import { isTaskInProject, formatTaskDescriptionWithProject } from '@/lib/projects'
 import { fetchWaitingReturns } from '@/lib/waiting-returns'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 export function useChantiers(urlStatus: string | null) {
   const [projects, setProjects] = useState<Project[]>([])
@@ -14,6 +15,7 @@ export function useChantiers(urlStatus: string | null) {
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<'TOUS' | 'EN COURS' | 'À FAIRE' | 'TERMINÉ'>('TOUS')
   const supabase = createClient()
+  const confirm = useConfirm()
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const [toastMsg, setToastMsg] = useState<string | null>(null)
@@ -57,7 +59,14 @@ export function useChantiers(urlStatus: string | null) {
   }
 
   const handleDeleteProject = async (projectId: string, name: string, activeWorkspaceProject: Project | null, setActiveWorkspaceProject: (p: Project | null) => void) => {
-    if (!window.confirm(`Supprimer définitivement le chantier "${name}" ?`)) return
+    const ok = await confirm({
+      title: 'Supprimer le chantier',
+      itemTitle: name,
+      message: 'Êtes-vous sûr de vouloir supprimer définitivement ce chantier ? Cette action est irréversible.',
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
     const { error } = await supabase.from('projects').delete().eq('id', projectId)
     if (!error) {
       setProjects(projects.filter(p => p.id !== projectId))

@@ -13,6 +13,7 @@ import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui
 import { VENDOR_ISSUE_STATUS_COLORS } from '@/lib/utils'
 import { Vendor, VendorIssue } from '@/lib/types'
 import { Plus, ChevronDown, ChevronUp, Edit2, Trash2, Pencil } from 'lucide-react'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 export default function PrestatairesPage() {
   const [vendors, setVendors] = useState<Vendor[]>([])
@@ -21,6 +22,7 @@ export default function PrestatairesPage() {
   const [expandedVendorId, setExpandedVendorId] = useState<string | null>(null)
   const [editingVendorId, setEditingVendorId] = useState<string | null>(null)
   const supabase = createClient()
+  const confirm = useConfirm()
 
   // Add Vendor Dialog
   const [isAddVendorOpen, setIsAddVendorOpen] = useState(false)
@@ -75,7 +77,14 @@ export default function PrestatairesPage() {
   }
 
   const handleDeleteVendor = async (vendorId: string, name: string) => {
-    if (!window.confirm(`Voulez-vous vraiment supprimer le prestataire "${name}" et tous ses tickets associés ?`)) return
+    const ok = await confirm({
+      title: 'Supprimer le prestataire',
+      itemTitle: name,
+      message: `Voulez-vous vraiment supprimer le prestataire "${name}" et tous ses tickets associés ? Cette action est irréversible.`,
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
     const { error } = await supabase.from('vendors').delete().eq('id', vendorId)
     if (!error) {
       setVendors(vendors.filter(v => v.id !== vendorId))
@@ -123,7 +132,14 @@ export default function PrestatairesPage() {
   }
 
   const handleDeleteIssue = async (issueId: string, title: string) => {
-    if (!window.confirm(`Supprimer le ticket "${title}" ?`)) return
+    const ok = await confirm({
+      title: 'Supprimer le ticket',
+      itemTitle: title,
+      message: `Êtes-vous sûr de vouloir supprimer ce ticket ? Cette action est irréversible.`,
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
     const { error } = await supabase.from('vendor_issues').delete().eq('id', issueId)
     if (!error) {
       setIssues(issues.filter(i => i.id !== issueId))

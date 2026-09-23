@@ -25,6 +25,7 @@ import {
 import { parseFlexibleEvent } from '@/lib/flexible-events'
 import { parseEventClosureComment, formatEventDescriptionWithClosure } from '@/lib/closure-comments'
 import { toYMD, getPresetDates } from './calendar-utils'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 interface EventFormDialogProps {
   isOpen: boolean
@@ -48,6 +49,7 @@ export function EventFormDialog({
   onDeleteSuccess
 }: EventFormDialogProps) {
   const supabase = createClient()
+  const confirm = useConfirm()
   
   const [formTitle, setFormTitle] = useState('')
   const [formDescription, setFormDescription] = useState('')
@@ -130,7 +132,14 @@ export function EventFormDialog({
   }
 
   const handleDeleteEvent = async (id: string, titleStr: string) => {
-    if (!window.confirm(`Supprimer l'événement "${titleStr}" ?`)) return
+    const ok = await confirm({
+      title: "Supprimer l'événement",
+      itemTitle: titleStr,
+      message: "Êtes-vous sûr de vouloir supprimer cet événement ? Cette action est irréversible.",
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
     const { error } = await supabase.from('events').delete().eq('id', id)
     if (!error) {
       setIsOpen(false)

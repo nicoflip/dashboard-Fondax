@@ -24,9 +24,11 @@ import { ProjectProgressBar } from '@/components/projects/ProjectProgressBar'
 import { ProjectCard } from '@/components/projects/ProjectCard'
 import { ProjectFormDialog } from '@/components/projects/ProjectFormDialog'
 import { ProjectWorkspace } from '@/components/projects/ProjectWorkspace'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 function ChantiersContent() {
   const searchParams = useSearchParams()
+  const confirm = useConfirm()
   const urlStatus = searchParams.get('status')
   const {
     projects, setProjects, tasks, setTasks, events, setEvents,
@@ -282,7 +284,15 @@ function ChantiersContent() {
   }
 
   const handleDeleteTask = async (taskId: string) => {
-    if (!window.confirm('Supprimer cette tâche ?')) return
+    const task = tasks.find(t => t.id === taskId)
+    const confirmed = await confirm({
+      title: 'Supprimer la tâche',
+      itemTitle: task?.title,
+      message: 'Êtes-vous sûr de vouloir supprimer cette tâche du chantier ? Cette action est irréversible.',
+      confirmText: 'Supprimer',
+      variant: 'danger',
+    })
+    if (!confirmed) return
     await supabase.from('tasks').delete().eq('id', taskId)
     setTasks(prev => prev.filter(t => t.id !== taskId))
     showToast('Tâche supprimée')

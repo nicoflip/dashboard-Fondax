@@ -43,11 +43,13 @@ import {
   HelpCircle,
   CalendarPlus
 } from 'lucide-react'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 type WaitingFilterTab = 'all' | 'due' | 'dragging' | 'blocking' | 'resolved'
 
 function EnAttenteContent() {
   const supabase = createClient()
+  const confirm = useConfirm()
 
   const [waitingReturns, setWaitingReturns] = useState<WaitingReturn[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
@@ -422,7 +424,15 @@ function EnAttenteContent() {
 
   // ACTION 6: Delete return
   const handleDeleteReturn = async (id: string) => {
-    if (!window.confirm('Voulez-vous vraiment supprimer ce retour attendu ?')) return
+    const item = waitingReturns.find(r => r.id === id)
+    const ok = await confirm({
+      title: 'Supprimer le retour attendu',
+      itemTitle: item?.title,
+      message: 'Êtes-vous sûr de vouloir supprimer définitivement ce retour attendu ? Cette action est irréversible.',
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
     await deleteWaitingReturn(supabase, id)
     const reloaded = await fetchWaitingReturns(supabase)
     setWaitingReturns(reloaded)

@@ -5,7 +5,7 @@ import { Task } from '@/lib/types'
 import { calculateTaskTemperature, PRIORITY_TARGET_DAYS } from '@/lib/task-temperature'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Snowflake, Flame, ArrowDown, Check, RefreshCw } from 'lucide-react'
+import { Snowflake, Flame, ArrowDown, Check, RefreshCw, Thermometer } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface TaskCoolDownDialogProps {
@@ -30,9 +30,10 @@ export function TaskCoolDownDialog({
 
   useEffect(() => {
     if (task && currentTemp) {
-      // Default suggestion: lower by 30% or reset to 20%
-      const suggested = Math.max(0, currentScore - 30)
-      setTargetScore(suggested > 0 ? suggested : 0)
+      // Si la tâche est déjà chaude (>= 30%), suggestion de refroidissement (-30%)
+      // Sinon, on part de son score actuel pour pouvoir ajuster facilement
+      const suggested = currentScore >= 30 ? Math.max(0, currentScore - 30) : currentScore
+      setTargetScore(suggested)
     }
   }, [task, open])
 
@@ -67,7 +68,7 @@ export function TaskCoolDownDialog({
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2 text-slate-900">
           <div className="p-1.5 rounded-lg bg-sky-100 text-sky-700">
-            <Snowflake className="w-5 h-5 text-sky-600" />
+            <Thermometer className="w-5 h-5 text-sky-600" />
           </div>
           <div>
             <span>Régler la température de la tâche</span>
@@ -160,22 +161,38 @@ export function TaskCoolDownDialog({
               <span className="text-[10px] font-normal text-slate-500">Tiède</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setTargetScore(Math.max(0, currentScore - 30))}
-              className={cn(
-                "p-2 rounded-lg border text-xs font-semibold flex flex-col items-center gap-1 transition-all cursor-pointer",
-                targetScore === Math.max(0, currentScore - 30) && targetScore !== 0 && targetScore !== 20 && targetScore !== 45
-                  ? "bg-emerald-50 border-emerald-500 text-emerald-900 ring-1 ring-emerald-300"
-                  : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-              )}
-            >
-              <span className="text-base flex items-center gap-0.5">
-                <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
-                -30%
-              </span>
-              <span className="text-[10px] font-normal text-slate-500">Baisse d'un cran</span>
-            </button>
+            {currentScore >= 30 ? (
+              <button
+                type="button"
+                onClick={() => setTargetScore(Math.max(0, currentScore - 30))}
+                className={cn(
+                  "p-2 rounded-lg border text-xs font-semibold flex flex-col items-center gap-1 transition-all cursor-pointer",
+                  targetScore === Math.max(0, currentScore - 30) && targetScore !== 0 && targetScore !== 20 && targetScore !== 45
+                    ? "bg-emerald-50 border-emerald-500 text-emerald-900 ring-1 ring-emerald-300"
+                    : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                )}
+              >
+                <span className="text-base flex items-center gap-0.5">
+                  <ArrowDown className="w-3.5 h-3.5 text-emerald-600" />
+                  -30%
+                </span>
+                <span className="text-[10px] font-normal text-slate-500">Baisse d'un cran</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setTargetScore(70)}
+                className={cn(
+                  "p-2 rounded-lg border text-xs font-semibold flex flex-col items-center gap-1 transition-all cursor-pointer",
+                  targetScore === 70
+                    ? "bg-orange-50 border-orange-500 text-orange-900 ring-1 ring-orange-300"
+                    : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
+                )}
+              >
+                <span className="text-base">🔥 70%</span>
+                <span className="text-[10px] font-normal text-slate-500">Chaud</span>
+              </button>
+            )}
           </div>
         </div>
 

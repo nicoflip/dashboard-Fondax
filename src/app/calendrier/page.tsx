@@ -21,6 +21,7 @@ import { CalendarAgendaView } from '@/components/calendar/CalendarAgendaView'
 import { FlexibleEventsView } from '@/components/calendar/FlexibleEventsView'
 import { EventFormDialog } from '@/components/calendar/EventFormDialog'
 import { EventClosureDialog } from '@/components/calendar/EventClosureDialog'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 const FullCalendar = dynamic(() => import('@fullcalendar/react'), {
   ssr: false,
@@ -36,6 +37,7 @@ const FullCalendar = dynamic(() => import('@fullcalendar/react'), {
 
 function CalendrierInner() {
   const searchParams = useSearchParams()
+  const confirm = useConfirm()
   const urlFilter = searchParams.get('filter')
 
   const { events, setEvents, tasks, vendors, fetchEvents, supabase } = useCalendarData()
@@ -172,7 +174,25 @@ function CalendrierInner() {
       )}
 
       {activeTab === 'agenda' && (
-        <CalendarAgendaView agendaGroups={agendaGroups} tasks={tasks} vendors={vendors} handleStatusChange={handleStatusChange} handleOpenEdit={handleOpenEdit} handleDeleteEvent={async (id, title) => { if (!window.confirm(`Supprimer l'événement "${title}" ?`)) return; await supabase.from('events').delete().eq('id', id); fetchEvents(); }} />
+        <CalendarAgendaView
+          agendaGroups={agendaGroups}
+          tasks={tasks}
+          vendors={vendors}
+          handleStatusChange={handleStatusChange}
+          handleOpenEdit={handleOpenEdit}
+          handleDeleteEvent={async (id, title) => {
+            const ok = await confirm({
+              title: "Supprimer l'événement",
+              itemTitle: title,
+              message: "Êtes-vous sûr de vouloir supprimer cet événement de l'agenda ? Cette action est irréversible.",
+              confirmText: 'Supprimer définitivement',
+              variant: 'danger',
+            })
+            if (!ok) return
+            await supabase.from('events').delete().eq('id', id)
+            fetchEvents()
+          }}
+        />
       )}
 
       {activeTab === 'flexible' && <FlexibleEventsView events={events} handleOpenEdit={handleOpenEdit} />}

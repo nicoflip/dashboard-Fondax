@@ -42,10 +42,12 @@ import { formatTaskDescriptionWithClosure } from '@/lib/closure-comments'
 import { useTaskThermostat } from '@/lib/task-thermostat'
 import { ThermostatPauseBanner } from '@/components/tasks/ThermostatPauseBanner'
 import { Plus, CheckCircle2, Flame, Hourglass } from 'lucide-react'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 function TasksContent() {
   const supabase = createClient()
   const thermostat = useTaskThermostat()
+  const confirm = useConfirm()
   const searchParams = useSearchParams()
   const urlTab = searchParams.get('tab')
   const urlPriority = searchParams.get('priority')
@@ -320,10 +322,21 @@ function TasksContent() {
 
   // Delete task
   const handleDeleteTask = async (taskId: string) => {
-    if (!window.confirm('Voulez-vous vraiment supprimer cette tâche ?')) return
+    const task = tasks.find(t => t.id === taskId)
+    const confirmed = await confirm({
+      title: 'Supprimer la tâche',
+      itemTitle: task?.title,
+      message: 'Êtes-vous sûr de vouloir supprimer définitivement cette tâche ? Cette action est irréversible.',
+      confirmText: 'Supprimer définitivement',
+      cancelText: 'Annuler',
+      variant: 'danger',
+    })
+    if (!confirmed) return
+
     const { error } = await supabase.from('tasks').delete().eq('id', taskId)
     if (!error) {
       setTasks(prev => prev.filter(t => t.id !== taskId))
+      showNotification('✓ Tâche supprimée !')
     }
   }
 

@@ -431,11 +431,11 @@ export function TaskCard({
                     {tempInfo.isPaused ? '(figé)' : `(${tempInfo.label})`}
                   </span>
                 </span>
-                {onCoolDown && tempInfo.score >= 30 && (
+                {onCoolDown && (
                   <button
                     type="button"
                     onClick={() => onCoolDown(task)}
-                    title="Régler la température de la tâche (choisir le niveau de refroidissement)"
+                    title="Régler la température de la tâche (gérer la chaleur)"
                     className="text-slate-400 hover:text-sky-600 hover:bg-sky-50 border border-slate-200 hover:border-sky-200 p-1 rounded-md transition-all cursor-pointer shadow-2xs"
                   >
                     <Snowflake className="w-3.5 h-3.5 text-sky-500" />

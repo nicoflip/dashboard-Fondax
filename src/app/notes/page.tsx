@@ -10,6 +10,7 @@ import { Plus, Trash2, CheckCircle2 } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 export default function NotesPage() {
   const [notes, setNotes] = useState<Note[]>([])
@@ -20,6 +21,7 @@ export default function NotesPage() {
   const [mounted, setMounted] = useState(false)
   
   const supabase = createClient()
+  const confirm = useConfirm()
 
   const fetchNotes = async () => {
     setLoading(true)
@@ -126,7 +128,15 @@ export default function NotesPage() {
   }
 
   const deleteNote = async (id: string) => {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer cette note ?')) return
+    const note = notes.find(n => n.id === id)
+    const ok = await confirm({
+      title: 'Supprimer la note',
+      itemTitle: note?.title || 'Note sans titre',
+      message: 'Êtes-vous sûr de vouloir supprimer cette note ? Cette action est irréversible.',
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
     const { error } = await supabase.from('notes').delete().eq('id', id)
     if (!error) {
       setNotes(notes.filter(n => n.id !== id))

@@ -32,6 +32,7 @@ import { NetworkLanPanel } from './NetworkLanPanel'
 import { NetworkEquipmentDialog } from './NetworkEquipmentDialog'
 import { NetworkConnectionDialog } from './NetworkConnectionDialog'
 import { NetworkAddZoneDialog, NetworkFormDialog, LanDeviceFormDialog } from './NetworkDialogs'
+import { useConfirm } from '@/components/ui/confirm-dialog'
 
 const nodeTypes = {
   equipment: EquipmentNode,
@@ -41,6 +42,7 @@ const nodeTypes = {
 
 export function NetworkCanvas() {
   const supabase = createClient()
+  const confirm = useConfirm()
   const { fitView } = useReactFlow()
   const [mounted, setMounted] = useState(false)
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
@@ -143,13 +145,19 @@ export function NetworkCanvas() {
     showToast(`➕ Préparation de l'ajout d'un équipement sur "${net.ssid}"`)
   }, [equipments])
 
-  const handleDeleteZone = useCallback((zoneId: string, zoneLabel?: string) => {
-    const msg = zoneLabel 
-      ? `Voulez-vous supprimer la zone "${zoneLabel}" ? (Les équipements à l'intérieur ne seront pas supprimés)`
-      : 'Voulez-vous supprimer cette zone ?'
-    if (!window.confirm(msg)) return
+  const handleDeleteZone = useCallback(async (zoneId: string, zoneLabel?: string) => {
+    const ok = await confirm({
+      title: 'Supprimer la zone',
+      itemTitle: zoneLabel,
+      message: zoneLabel 
+        ? `Voulez-vous supprimer la zone "${zoneLabel}" ? Les équipements à l'intérieur ne seront pas supprimés.`
+        : 'Voulez-vous supprimer cette zone ? Les équipements à l\'intérieur ne seront pas supprimés.',
+      confirmText: 'Supprimer la zone',
+      variant: 'danger',
+    })
+    if (!ok) return
     setNodes(nds => nds.filter(n => n.id !== zoneId))
-  }, [setNodes])
+  }, [confirm, setNodes])
 
   useEffect(() => {
     setMounted(true)
@@ -305,7 +313,13 @@ export function NetworkCanvas() {
 
   const handleDeleteEdge = async () => {
     if (!selectedEdge) return
-    if (!window.confirm('Voulez-vous supprimer cette connexion réseau ?')) return
+    const ok = await confirm({
+      title: 'Supprimer la connexion réseau',
+      message: 'Voulez-vous supprimer cette liaison réseau ?',
+      confirmText: 'Supprimer la liaison',
+      variant: 'danger',
+    })
+    if (!ok) return
     await supabase.from('network_connections').delete().eq('id', selectedEdge.id)
     setEdges(eds => eds.filter(e => e.id !== selectedEdge.id))
     setIsEdgeModalOpen(false)
@@ -367,7 +381,15 @@ export function NetworkCanvas() {
   }
 
   const handleDeleteEquipment = async (id: string) => {
-    if (!window.confirm('Voulez-vous vraiment supprimer cet équipement et toutes ses connexions ?')) return
+    const eq = equipments.find(e => e.id === id)
+    const ok = await confirm({
+      title: "Supprimer l'équipement",
+      itemTitle: eq?.name,
+      message: "Voulez-vous vraiment supprimer cet équipement et toutes ses connexions ? Cette action est irréversible.",
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
     await supabase.from('network_equipment').delete().eq('id', id)
     setEquipments(prev => prev.filter(e => e.id !== id))
     setNodes(nds => nds.filter(n => n.id !== id))
@@ -482,7 +504,14 @@ export function NetworkCanvas() {
   }
 
   const handleDeleteNetwork = async (id: string, ssid?: string | null) => {
-    if (!window.confirm(`Voulez-vous vraiment supprimer le réseau "${ssid || 'sélectionné'}" ?`)) return
+    const ok = await confirm({
+      title: 'Supprimer le réseau',
+      itemTitle: ssid || undefined,
+      message: `Voulez-vous vraiment supprimer le réseau "${ssid || 'sélectionné'}" ? Cette action est irréversible.`,
+      confirmText: 'Supprimer définitivement',
+      variant: 'danger',
+    })
+    if (!ok) return
     await supabase.from('networks').delete().eq('id', id)
     setNetworks(prev => prev.filter(n => n.id !== id))
     setNodes(nds => nds.filter(n => n.id !== `net-${id}`))
@@ -544,7 +573,14 @@ export function NetworkCanvas() {
   }
 
   const handleDeleteLanDevice = async (id: string, name?: string | null) => {
-    if (!window.confirm(`Voulez-vous supprimer cet appareil LAN (${name || id}) ?`)) return
+    const ok = await confirm({
+      title: "Supprimer l'appareil LAN",
+      itemTitle: name || id,
+      message: `Voulez-vous supprimer cet appareil LAN (${name || id}) ? Cette action est irréversible.`,
+      confirmText: 'Supprimer',
+      variant: 'danger',
+    })
+    if (!ok) return
     await supabase.from('lan_devices').delete().eq('id', id)
     setLanDevices(prev => prev.filter(d => d.id !== id))
     showToast('Appareil LAN supprimé !')
