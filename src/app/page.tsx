@@ -388,7 +388,7 @@ export default function Dashboard() {
                 <p className="text-sm text-slate-500">Aucune tâche en surchauffe en attente.</p>
               ) : (
                 highPriorityTasks.map(task => {
-                  const temp = calculateTaskTemperature(task)
+                  const temp = calculateTaskTemperature(task, new Date(), thermostat)
                   return (
                     <div key={task.id} className="flex flex-col gap-2 rounded-lg border border-red-200 border-l-[5px] border-l-red-600 bg-red-50/40 p-3.5 shadow-xs transition-colors hover:bg-red-50/70">
                       <div className="flex items-start justify-between gap-2">

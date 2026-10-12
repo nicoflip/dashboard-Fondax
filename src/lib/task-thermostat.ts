@@ -46,28 +46,64 @@ export const PAUSE_REASON_LABELS: Record<PauseReason, { label: string; icon: str
   }
 }
 
+export const CATCHUP_15D_INTERVAL_ID = 'pause_rattrapage_15j'
+
+export const DEFAULT_CATCHUP_INTERVAL: PauseInterval = {
+  id: CATCHUP_15D_INTERVAL_ID,
+  start: '2026-09-27T08:00:00.000Z',
+  end: '2026-10-12T08:00:00.000Z',
+  reason: 'autre',
+  customReason: 'Rattrapage pause 15 jours (recul des températures)'
+}
+
 /**
  * Récupère l'état actuel du thermostat depuis le localStorage.
+ * Intègre automatiquement l'intervalle de rattrapage de 15 jours pour compenser l'absence.
  */
 export function getThermostatState(): ThermostatState {
   if (typeof window === 'undefined') {
-    return { isPaused: false, intervals: [] }
+    return { isPaused: false, intervals: [DEFAULT_CATCHUP_INTERVAL] }
   }
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { isPaused: false, intervals: [] }
+    if (!raw) {
+      const initial: ThermostatState = { isPaused: false, intervals: [DEFAULT_CATCHUP_INTERVAL] }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(initial))
+      } catch (err) {}
+      return initial
+    }
+
     const parsed = JSON.parse(raw) as ThermostatState
+    const intervals = Array.isArray(parsed.intervals) ? [...parsed.intervals] : []
+
+    // Si le rattrapage des 15 jours n'est pas encore présent, l'ajouter automatiquement
+    if (!intervals.some(i => i.id === CATCHUP_15D_INTERVAL_ID)) {
+      intervals.push(DEFAULT_CATCHUP_INTERVAL)
+      const updated: ThermostatState = {
+        isPaused: Boolean(parsed.isPaused),
+        currentPauseStart: parsed.currentPauseStart,
+        currentPauseReason: parsed.currentPauseReason,
+        currentCustomReason: parsed.currentCustomReason,
+        intervals
+      }
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+      } catch (err) {}
+      return updated
+    }
+
     return {
       isPaused: Boolean(parsed.isPaused),
       currentPauseStart: parsed.currentPauseStart,
       currentPauseReason: parsed.currentPauseReason,
       currentCustomReason: parsed.currentCustomReason,
-      intervals: Array.isArray(parsed.intervals) ? parsed.intervals : []
+      intervals
     }
   } catch (err) {
     console.error('Erreur lecture thermostat localStorage:', err)
-    return { isPaused: false, intervals: [] }
+    return { isPaused: false, intervals: [DEFAULT_CATCHUP_INTERVAL] }
   }
 }
 
@@ -179,6 +215,44 @@ export function getPausedDurationBetween(
 }
 
 /**
+ * Décale manuellement les températures de N jours en arrière (ajoute un intervalle de pause de N jours).
+ */
+export function rollbackThermostatDays(days: number = 15, customReason?: string): ThermostatState {
+  const current = getThermostatState()
+  const now = new Date()
+  const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
+
+  const newInterval: PauseInterval = {
+    id: `rollback_${days}d_${Date.now()}`,
+    start: start.toISOString(),
+    end: now.toISOString(),
+    reason: 'autre',
+    customReason: customReason || `Rattrapage -${days} jours`
+  }
+
+  const next: ThermostatState = {
+    ...current,
+    intervals: [...current.intervals, newInterval]
+  }
+
+  saveThermostatState(next)
+  return next
+}
+
+/**
+ * Supprime l'intervalle de rattrapage de 15 jours si l'utilisateur souhaite le retirer.
+ */
+export function removeCatchupInterval(): ThermostatState {
+  const current = getThermostatState()
+  const next: ThermostatState = {
+    ...current,
+    intervals: current.intervals.filter(i => i.id !== CATCHUP_15D_INTERVAL_ID && !i.id.startsWith('rollback_'))
+  }
+  saveThermostatState(next)
+  return next
+}
+
+/**
  * Hook React pour écouter en direct l'état du thermostat dans n'importe quel composant.
  */
 export function useTaskThermostat() {
@@ -189,9 +263,12 @@ export function useTaskThermostat() {
   }, [])
 
   useEffect(() => {
-    // Synchronisation sur le même onglet
+    // 1. Synchronisation immédiate dès le montage côté client pour éviter tout décalage d'hydratation SSR
+    refresh()
+
+    // 2. Synchronisation sur le même onglet
     window.addEventListener(CHANGE_EVENT, refresh)
-    // Synchronisation entre onglets différents
+    // 3. Synchronisation entre onglets différents
     window.addEventListener('storage', refresh)
 
     return () => {
@@ -210,10 +287,25 @@ export function useTaskThermostat() {
     setState(updated)
   }, [])
 
+  const handleRollbackDays = useCallback((days: number = 15, customReason?: string) => {
+    const updated = rollbackThermostatDays(days, customReason)
+    setState(updated)
+  }, [])
+
+  const handleRemoveCatchup = useCallback(() => {
+    const updated = removeCatchupInterval()
+    setState(updated)
+  }, [])
+
+  const hasCatchup15d = state.intervals.some(i => i.id === CATCHUP_15D_INTERVAL_ID || i.id.startsWith('rollback_'))
+
   return {
     ...state,
+    hasCatchup15d,
     pause: handlePause,
     resume: handleResume,
+    rollbackDays: handleRollbackDays,
+    removeCatchup: handleRemoveCatchup,
     refresh
   }
 }

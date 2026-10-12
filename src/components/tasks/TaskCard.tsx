@@ -38,6 +38,7 @@ import {
 } from 'lucide-react'
 import { calculateTaskTemperature, formatInactiveTime } from '@/lib/task-temperature'
 import { parseTaskClosureComment } from '@/lib/closure-comments'
+import { ThermostatState } from '@/lib/task-thermostat'
 
 interface TaskCardProps {
   task: Task
@@ -45,6 +46,7 @@ interface TaskCardProps {
   allEvents: CalendarEvent[]
   waitingReturns?: WaitingReturn[]
   allProjects?: Project[]
+  thermostat?: ThermostatState
   onEdit: (task: Task) => void
   onDelete: (taskId: string) => void
   onSchedule: (task: Task) => void
@@ -59,6 +61,7 @@ export function TaskCard({
   allEvents,
   waitingReturns = [],
   allProjects = [],
+  thermostat,
   onEdit,
   onDelete,
   onSchedule,
@@ -70,7 +73,7 @@ export function TaskCard({
   const isFait = task.status === 'fait'
   const isEnCours = task.status === 'en cours'
   const isHighPrio = task.priority === 'haute'
-  const tempInfo = calculateTaskTemperature(task)
+  const tempInfo = calculateTaskTemperature(task, undefined, thermostat)
   const isUrgent = tempInfo.score >= 70 && !isFait
 
   // Normaliser la catégorie et trouver la couleur thématique

@@ -737,6 +737,7 @@ function TasksContent() {
                       allEvents={events}
                       waitingReturns={waitingReturns}
                       allProjects={projects}
+                      thermostat={thermostat}
                       onEdit={(t) => {
                         setEditingTask(t)
                         setIsFormOpen(true)
@@ -782,6 +783,7 @@ function TasksContent() {
                     allEvents={events}
                     waitingReturns={waitingReturns}
                     allProjects={projects}
+                    thermostat={thermostat}
                     onEdit={(t) => {
                       setEditingTask(t)
                       setIsFormOpen(true)
