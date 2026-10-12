@@ -2,9 +2,8 @@
 
 import React, { useState } from 'react'
 import { useTaskThermostat, PAUSE_REASON_LABELS, PauseReason } from '@/lib/task-thermostat'
-import { Button } from '@/components/ui/button'
 import { Dialog, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Flame, Snowflake, Play, Pause, Clock, RotateCcw, ShieldCheck } from 'lucide-react'
+import { Flame, Snowflake, Play, Pause, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface ThermostatBadgeButtonProps {
@@ -18,20 +17,11 @@ export function ThermostatBadgeButton({ variant = 'sidebar', className }: Thermo
     currentPauseStart, 
     currentPauseReason, 
     pause, 
-    resume, 
-    rollbackDays, 
-    removeCatchup,
-    hasCatchup15d 
+    resume
   } = useTaskThermostat()
   
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedReason, setSelectedReason] = useState<PauseReason>('weekend')
-  const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null)
-
-  const showFeedback = (msg: string) => {
-    setFeedbackMsg(msg)
-    setTimeout(() => setFeedbackMsg(null), 3500)
-  }
 
   // Format start time if paused
   const pausedSinceText = currentPauseStart ? (() => {
@@ -56,84 +46,28 @@ export function ThermostatBadgeButton({ variant = 'sidebar', className }: Thermo
     resume()
   }
 
-  const handleApplyExtraRollback = () => {
-    rollbackDays(15, 'Rattrapage manuel 15 jours supplémentaires')
-    showFeedback('✓ 15 jours supplémentaires décomptés avec succès !')
-  }
-
-  const handleResetRollback = () => {
-    removeCatchup()
-    showFeedback('Rattrapage réinitialisé.')
-  }
-
   const renderDialog = () => (
     <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)}>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2 text-slate-900">
-          <Snowflake className="w-5 h-5 text-sky-600" />
-          Thermostat &amp; Suivi d&apos;absence
+          <div className="p-1.5 rounded-lg bg-sky-100 text-sky-600">
+            <Pause className="w-5 h-5" />
+          </div>
+          <span>Badger un départ (Mise en pause)</span>
         </DialogTitle>
       </DialogHeader>
 
-      <div className="p-4 space-y-4">
-        {feedbackMsg && (
-          <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium">
-            {feedbackMsg}
-          </div>
-        )}
+      <div className="p-4 space-y-3">
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Gèle l&apos;indice thermique de toutes vos tâches. Le temps passé en pause ne sera pas décompté de leur inactivité.
+        </p>
 
-        {/* Section 1 : Rattrapage d'absence appliqué */}
-        <div className="p-3 bg-blue-50/80 rounded-xl border border-blue-200/90 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-blue-600" />
-              Rattrapage des températures (-15j)
-            </span>
-            <span className={cn(
-              "text-[10px] px-2 py-0.5 rounded-full font-semibold",
-              hasCatchup15d ? "bg-blue-200 text-blue-900" : "bg-slate-200 text-slate-700"
-            )}>
-              {hasCatchup15d ? "Actif (-15 jours)" : "Standard"}
-            </span>
-          </div>
-          <p className="text-[11px] text-blue-800 leading-relaxed">
-            {hasCatchup15d 
-              ? "Toutes vos tâches ont reculé de 15 jours en inactivité. Leurs valeurs de température sont allégées comme avant votre absence."
-              : "Aucun décalage d'inactivité supplémentaire n'est actuellement appliqué."}
-          </p>
-          <div className="flex items-center gap-2 pt-1">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleApplyExtraRollback}
-              className="text-xs h-7 border-blue-300 text-blue-900 hover:bg-blue-100 flex items-center gap-1"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Reculer encore de 15j</span>
-            </Button>
-            {hasCatchup15d && (
-              <button
-                type="button"
-                onClick={handleResetRollback}
-                className="text-[11px] text-blue-600 hover:text-blue-900 underline ml-auto cursor-pointer"
-              >
-                Annuler rattrapage
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Section 2 : Geler pour une nouvelle absence */}
         <div className="space-y-2 pt-1">
           <label className="text-xs font-bold text-slate-800 block">
-            Badger une absence (Mettre en pause) :
+            Motif de l&apos;absence :
           </label>
-          <p className="text-xs text-slate-600 leading-relaxed">
-            Gèle l&apos;indice thermique de toutes vos tâches. Le temps passé en pause ne sera pas décompté.
-          </p>
 
-          <div className="grid grid-cols-1 gap-2 pt-1">
+          <div className="grid grid-cols-1 gap-2">
             {(Object.keys(PAUSE_REASON_LABELS) as PauseReason[]).map(key => {
               const item = PAUSE_REASON_LABELS[key]
               const isSel = selectedReason === key
@@ -145,13 +79,13 @@ export function ThermostatBadgeButton({ variant = 'sidebar', className }: Thermo
                   className={cn(
                     "flex items-center gap-3 p-2.5 rounded-xl border text-left transition-all cursor-pointer",
                     isSel
-                      ? "bg-sky-50 border-sky-500 ring-2 ring-sky-200 text-sky-950"
-                      : "bg-white border-slate-200 hover:bg-slate-50 text-slate-700"
+                      ? "bg-sky-50 border-sky-500 ring-2 ring-sky-200 text-sky-950 shadow-xs"
+                      : "bg-white border-slate-200 hover:bg-slate-50 text-slate-700 hover:border-slate-300"
                   )}
                 >
-                  <span className="text-xl">{item.icon}</span>
+                  <span className="text-xl shrink-0">{item.icon}</span>
                   <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold">{item.label}</div>
+                    <div className="text-xs font-bold text-slate-900">{item.label}</div>
                     <div className="text-[11px] text-slate-500">{item.description}</div>
                   </div>
                 </button>
@@ -161,17 +95,22 @@ export function ThermostatBadgeButton({ variant = 'sidebar', className }: Thermo
         </div>
       </div>
 
-      <DialogFooter>
-        <Button variant="outline" onClick={() => setDialogOpen(false)}>
-          Fermer
-        </Button>
-        <Button
-          onClick={handleConfirmPause}
-          className="bg-sky-600 hover:bg-sky-700 text-white flex items-center gap-2"
+      <DialogFooter className="gap-2 sm:gap-2">
+        <button
+          type="button"
+          onClick={() => setDialogOpen(false)}
+          className="px-3.5 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 text-xs font-semibold transition-colors cursor-pointer"
         >
-          <Pause className="w-4 h-4" />
+          Annuler
+        </button>
+        <button
+          type="button"
+          onClick={handleConfirmPause}
+          className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+        >
+          <Pause className="w-3.5 h-3.5" />
           <span>Geler les températures</span>
-        </Button>
+        </button>
       </DialogFooter>
     </Dialog>
   )
@@ -198,7 +137,7 @@ export function ThermostatBadgeButton({ variant = 'sidebar', className }: Thermo
           <button
             type="button"
             onClick={handleOpenPauseDialog}
-            title="Réchauffement actif. Cliquez pour mettre en pause ou gérer le rattrapage thermique."
+            title="Réchauffement actif. Cliquez pour mettre en pause."
             className={cn(
               "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/25 transition-all cursor-pointer",
               className
@@ -206,7 +145,6 @@ export function ThermostatBadgeButton({ variant = 'sidebar', className }: Thermo
           >
             <Flame className="w-3.5 h-3.5 text-amber-400" />
             <span>En poste</span>
-            {hasCatchup15d && <span className="text-[10px] text-sky-300 font-normal">(-15j)</span>}
           </button>
         )}
 
@@ -215,13 +153,13 @@ export function ThermostatBadgeButton({ variant = 'sidebar', className }: Thermo
     )
   }
 
-  // 2. Sidebar variant (styled card in the desktop sidebar)
+  // 2. Sidebar variant (styled card in desktop sidebar)
   return (
     <>
       <div className={cn("px-3 py-2", className)}>
         {isPaused ? (
           /* PAUSED CARD */
-          <div className="bg-sky-950/70 border border-sky-600/40 rounded-xl p-3 text-sky-100 shadow-inner">
+          <div className="bg-sky-950/70 border border-sky-600/50 rounded-xl p-3 text-sky-100 shadow-inner">
             <div className="flex items-center justify-between gap-1 mb-1.5">
               <div className="flex items-center gap-1.5 font-bold text-xs text-sky-300">
                 <Snowflake className="w-4 h-4 text-sky-400 animate-spin-slow" />
@@ -230,51 +168,48 @@ export function ThermostatBadgeButton({ variant = 'sidebar', className }: Thermo
               <span className="text-base">{activeReasonInfo?.icon || '❄️'}</span>
             </div>
 
-            <div className="text-[11px] text-sky-200/80 mb-2.5 flex items-center gap-1">
+            <div className="text-[11px] text-sky-200/90 mb-2.5 flex items-center gap-1.5">
               <Clock className="w-3 h-3 text-sky-400 shrink-0" />
               <span>Figé depuis {pausedSinceText}</span>
             </div>
 
-            <Button
-              size="sm"
+            <button
+              type="button"
               onClick={handleQuickResume}
-              className="w-full bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs h-8 shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-sky-500 hover:bg-sky-400 active:bg-sky-600 text-slate-950 font-bold text-xs shadow-sm transition-all duration-150 cursor-pointer"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
-              <span>Badger Arrivée (Reprendre)</span>
-            </Button>
+              <span>Badger l&apos;Arrivée (Reprendre)</span>
+            </button>
           </div>
         ) : (
           /* ACTIVE CARD */
-          <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 text-slate-200">
-            <div className="flex items-center justify-between gap-1 mb-1">
+          <div className="bg-slate-800/80 border border-slate-700 rounded-xl p-3 text-slate-200 shadow-sm">
+            <div className="flex items-center justify-between gap-1 mb-1.5">
               <div className="flex items-center gap-1.5 font-semibold text-xs text-emerald-400">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>En poste • Réchauffement actif</span>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span>En poste • Thermostat actif</span>
               </div>
               <Flame className="w-3.5 h-3.5 text-amber-400" />
             </div>
 
-            <div className="flex items-center justify-between gap-1 mb-2">
-              <p className="text-[10px] text-slate-400">
-                Évolution thermique selon l&apos;inactivité.
-              </p>
-              {hasCatchup15d && (
-                <span className="text-[10px] font-semibold text-sky-300 bg-sky-950/80 px-1.5 py-0.5 rounded border border-sky-800">
-                  ❄️ -15j
-                </span>
-              )}
-            </div>
+            <p className="text-[11px] text-slate-400 mb-2.5 leading-relaxed">
+              Évolution thermique selon l&apos;inactivité.
+            </p>
 
-            <Button
-              variant="outline"
-              size="sm"
+            <button
+              type="button"
               onClick={handleOpenPauseDialog}
-              className="w-full border-slate-600 hover:bg-slate-700 text-slate-200 text-xs h-7.5 flex items-center justify-center gap-1.5 cursor-pointer"
+              className="w-full group flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-slate-700 hover:bg-slate-650 active:bg-slate-600 text-white border border-slate-600 hover:border-sky-500/50 shadow-xs transition-all duration-150 cursor-pointer font-medium text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/40"
             >
-              <Pause className="w-3 h-3 text-sky-400" />
-              <span>Badger Départ / Thermostat</span>
-            </Button>
+              <span className="flex items-center justify-center w-5 h-5 rounded-md bg-sky-500/15 text-sky-400 group-hover:bg-sky-500/25 transition-colors">
+                <Pause className="w-3.5 h-3.5" />
+              </span>
+              <span className="text-slate-100 group-hover:text-white font-semibold">Badger un départ (Pause)</span>
+            </button>
           </div>
         )}
       </div>

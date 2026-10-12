@@ -48,27 +48,18 @@ export const PAUSE_REASON_LABELS: Record<PauseReason, { label: string; icon: str
 
 export const CATCHUP_15D_INTERVAL_ID = 'pause_rattrapage_15j'
 
-export const DEFAULT_CATCHUP_INTERVAL: PauseInterval = {
-  id: CATCHUP_15D_INTERVAL_ID,
-  start: '2026-09-27T08:00:00.000Z',
-  end: '2026-10-12T08:00:00.000Z',
-  reason: 'autre',
-  customReason: 'Rattrapage pause 15 jours (recul des températures)'
-}
-
 /**
  * Récupère l'état actuel du thermostat depuis le localStorage.
- * Intègre automatiquement l'intervalle de rattrapage de 15 jours pour compenser l'absence.
  */
 export function getThermostatState(): ThermostatState {
   if (typeof window === 'undefined') {
-    return { isPaused: false, intervals: [DEFAULT_CATCHUP_INTERVAL] }
+    return { isPaused: false, intervals: [] }
   }
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) {
-      const initial: ThermostatState = { isPaused: false, intervals: [DEFAULT_CATCHUP_INTERVAL] }
+      const initial: ThermostatState = { isPaused: false, intervals: [] }
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(initial))
       } catch (err) {}
@@ -76,22 +67,14 @@ export function getThermostatState(): ThermostatState {
     }
 
     const parsed = JSON.parse(raw) as ThermostatState
-    const intervals = Array.isArray(parsed.intervals) ? [...parsed.intervals] : []
+    const rawIntervals = Array.isArray(parsed.intervals) ? parsed.intervals : []
+    // Nettoyage de l'ancien rattrapage -15j injecté automatiquement
+    const intervals = rawIntervals.filter(i => i.id !== CATCHUP_15D_INTERVAL_ID && !i.id.startsWith('rollback_'))
 
-    // Si le rattrapage des 15 jours n'est pas encore présent, l'ajouter automatiquement
-    if (!intervals.some(i => i.id === CATCHUP_15D_INTERVAL_ID)) {
-      intervals.push(DEFAULT_CATCHUP_INTERVAL)
-      const updated: ThermostatState = {
-        isPaused: Boolean(parsed.isPaused),
-        currentPauseStart: parsed.currentPauseStart,
-        currentPauseReason: parsed.currentPauseReason,
-        currentCustomReason: parsed.currentCustomReason,
-        intervals
-      }
+    if (intervals.length !== rawIntervals.length) {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, intervals }))
       } catch (err) {}
-      return updated
     }
 
     return {
@@ -103,7 +86,7 @@ export function getThermostatState(): ThermostatState {
     }
   } catch (err) {
     console.error('Erreur lecture thermostat localStorage:', err)
-    return { isPaused: false, intervals: [DEFAULT_CATCHUP_INTERVAL] }
+    return { isPaused: false, intervals: [] }
   }
 }
 

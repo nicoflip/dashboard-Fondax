@@ -1,13 +1,12 @@
 'use client'
 
-import React, { useState } from 'react'
+import React from 'react'
 import { useTaskThermostat, PAUSE_REASON_LABELS } from '@/lib/task-thermostat'
 import { Button } from '@/components/ui/button'
-import { Snowflake, Play, CheckCircle2, X } from 'lucide-react'
+import { Snowflake, Play } from 'lucide-react'
 
 export function ThermostatPauseBanner() {
-  const { isPaused, currentPauseStart, currentPauseReason, resume, hasCatchup15d } = useTaskThermostat()
-  const [catchupDismissed, setCatchupDismissed] = useState(false)
+  const { isPaused, currentPauseStart, currentPauseReason, resume } = useTaskThermostat()
 
   if (isPaused) {
     const reasonInfo = currentPauseReason ? PAUSE_REASON_LABELS[currentPauseReason] : null
@@ -47,40 +46,6 @@ export function ThermostatPauseBanner() {
           <Play className="w-3.5 h-3.5 fill-current" />
           <span>Badger l'Arrivée (Reprendre)</span>
         </Button>
-      </div>
-    )
-  }
-
-  // Si non en pause mais avec le rattrapage thermique des 15 jours appliqué
-  if (hasCatchup15d && !catchupDismissed) {
-    return (
-      <div className="bg-blue-50/90 border border-blue-200 rounded-xl p-3 sm:p-3.5 text-blue-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in">
-        <div className="flex items-start sm:items-center gap-3">
-          <div className="p-2 bg-blue-600 text-white rounded-lg shrink-0 shadow-xs">
-            <Snowflake className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-sm text-blue-950">
-                Rattrapage d'absence actif (-15 jours sur les températures)
-              </span>
-              <span className="text-xs bg-blue-200/80 text-blue-900 px-2 py-0.5 rounded-full font-semibold">
-                Appliqué
-              </span>
-            </div>
-            <p className="text-xs text-blue-800 mt-0.5">
-              Toutes les valeurs de température ont été reculées de 15 jours pour compenser la période d'inactivité. Le réchauffement normal reprend son cours régulier.
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={() => setCatchupDismissed(true)}
-          className="self-end sm:self-center p-1 text-blue-500 hover:text-blue-800 rounded-md transition-colors cursor-pointer"
-          title="Fermer ce message"
-        >
-          <X className="w-4 h-4" />
-        </button>
       </div>
     )
   }
