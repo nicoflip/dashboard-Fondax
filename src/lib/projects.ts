@@ -14,7 +14,10 @@ export function extractTaskProjectId(desc?: string | null): string | null {
  */
 export function cleanTaskDescriptionProject(desc?: string | null): string {
   if (!desc) return ''
-  return desc.replace(/\[chantier_id:[^\]]+\]/gi, '').trim()
+  return desc
+    .replace(/\[chantier_id:[^\]]+\]/gi, '')
+    .replace(/\[heat_ref:[^\]]+\]\s*/gi, '')
+    .trim()
 }
 
 /**

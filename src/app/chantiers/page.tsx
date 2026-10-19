@@ -16,6 +16,7 @@ import {
 import { removeWaitingTag } from '@/lib/waiting'
 import { combineDateAndTime } from '@/lib/utils'
 import { formatFlexibleEventDescription } from '@/lib/flexible-events'
+import { formatTaskDescriptionWithHeatRef, getTaskHeatRefDate } from '@/lib/task-temperature'
 
 // Components
 import { useChantiers } from '@/components/projects/useChantiers'
@@ -183,15 +184,29 @@ function ChantiersContent() {
       const wasFait = editingTask.status === 'fait'
       const isNowFait = formData.status === 'fait'
 
+      // Préserver la date d'ancrage thermique existante pour ne pas remettre la chaleur à zéro lors d'un enregistrement
+      const existingHeatDate = (!wasFait && isNowFait)
+        ? null
+        : (wasFait && !isNowFait)
+        ? new Date().toISOString()
+        : getTaskHeatRefDate(editingTask)
+
+      finalDescription = formatTaskDescriptionWithHeatRef(finalDescription, existingHeatDate)
+
+      const updatePayload: Record<string, any> = {
+        title: formData.title,
+        description: finalDescription,
+        category: formData.category,
+        priority: formData.priority,
+        status: formData.status
+      }
+      if (existingHeatDate) {
+        updatePayload.updated_at = existingHeatDate
+      }
+
       const { data, error } = await supabase
         .from('tasks')
-        .update({
-          title: formData.title,
-          description: finalDescription,
-          category: formData.category,
-          priority: formData.priority,
-          status: formData.status
-        })
+        .update(updatePayload)
         .eq('id', editingTask.id)
         .select()
         .single()
@@ -209,6 +224,9 @@ function ChantiersContent() {
         }
       }
     } else {
+      const initialHeatDate = new Date().toISOString()
+      finalDescription = formatTaskDescriptionWithHeatRef(finalDescription, initialHeatDate)
+
       const { data, error } = await supabase
         .from('tasks')
         .insert([{

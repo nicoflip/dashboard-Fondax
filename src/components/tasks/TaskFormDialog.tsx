@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge'
 import { Calendar as CalendarIcon, User, Plus, Clock, FolderKanban, Flame, CheckCircle2 } from 'lucide-react'
 
 import { parseTaskClosureComment } from '@/lib/closure-comments'
+import { cleanTaskDescriptionHeatRef } from '@/lib/task-temperature'
 
 export interface TaskFormData {
   title: string
@@ -106,7 +107,7 @@ export function TaskFormDialog({
         const returnId = extractWaitingReturnId(editingTask.description)
         const projId = extractTaskProjectId(editingTask.description)
         const closure = parseTaskClosureComment(editingTask.description)
-        const cleanDescription = parseTaskClosureComment(blocker.cleanDescription).cleanDesc
+        const cleanDescription = cleanTaskDescriptionHeatRef(parseTaskClosureComment(blocker.cleanDescription).cleanDesc)
 
         setFormData({
           title: editingTask.title,

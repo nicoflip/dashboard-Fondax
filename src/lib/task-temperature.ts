@@ -28,6 +28,45 @@ export const PRIORITY_TARGET_DAYS: Record<TaskPriority, number> = {
 }
 
 /**
+ * Extrait la date d'ancrage thermique [heat_ref:ISO_DATE] présente dans la description d'une tâche.
+ */
+export function extractTaskHeatRefDate(desc?: string | null): string | null {
+  if (!desc) return null
+  const match = desc.match(/\[heat_ref:([^\]]+)\]/i)
+  return match ? match[1].trim() : null
+}
+
+/**
+ * Nettoie la description d'une tâche en retirant la balise thermique [heat_ref:...].
+ */
+export function cleanTaskDescriptionHeatRef(desc?: string | null): string {
+  if (!desc) return ''
+  return desc.replace(/\[heat_ref:[^\]]+\]\s*/gi, '').trim()
+}
+
+/**
+ * Formate la description d'une tâche en y ajoutant ou mettant à jour la balise d'ancrage thermique.
+ */
+export function formatTaskDescriptionWithHeatRef(
+  desc: string | null | undefined, 
+  heatRefDate: string | null | undefined
+): string {
+  const cleaned = cleanTaskDescriptionHeatRef(desc)
+  if (!heatRefDate) return cleaned
+  return cleaned ? `${cleaned}\n[heat_ref:${heatRefDate}]` : `[heat_ref:${heatRefDate}]`
+}
+
+/**
+ * Retourne la date de référence servant au calcul de température d'une tâche.
+ * Utilise en priorité la balise [heat_ref:...], sinon updated_at, sinon created_at.
+ */
+export function getTaskHeatRefDate(task: Task): string {
+  const fromTag = extractTaskHeatRefDate(task.description)
+  if (fromTag) return fromTag
+  return task.updated_at || task.created_at || new Date().toISOString()
+}
+
+/**
  * Calcule l'indice thermique (température / pourcentage d'oubli) d'une tâche.
  * Prend en compte les périodes de pause du thermostat (week-ends, cours, congés).
  * Plus le temps actif passe sans action, plus la température augmente.
@@ -61,7 +100,7 @@ export function calculateTaskTemperature(
   const thermo = thermostat || getThermostatState()
 
   // 2. Calcul du temps brut écoulé depuis la dernière action
-  const refDateStr = task.updated_at || task.created_at
+  const refDateStr = getTaskHeatRefDate(task)
   const refDate = new Date(refDateStr)
   const totalElapsedMs = Math.max(0, now.getTime() - refDate.getTime())
 

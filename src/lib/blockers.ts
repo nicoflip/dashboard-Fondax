@@ -9,8 +9,10 @@ export function parseTaskBlocker(desc?: string | null): TaskBlockerInfo {
     return { type: 'none', requiredStatus: 'fait', cleanDescription: '' }
   }
 
-  // Retirer temporairement les balises [waiting:...] pour matcher le bloqueur indépendamment de l'ordre
-  const cleanedForBlocker = desc.replace(/\[waiting:[^\]]+\]\s*\n?/gi, '')
+  // Retirer temporairement les balises [waiting:...] et [heat_ref:...] pour matcher le bloqueur indépendamment de l'ordre
+  const cleanedForBlocker = desc
+    .replace(/\[waiting:[^\]]+\]\s*\n?/gi, '')
+    .replace(/\[heat_ref:[^\]]+\]\s*\n?/gi, '')
 
   // 1. Bloqueur par tâche (nouveau format) : [depends_on:task:<taskId>:<status>]
   const taskMatch = cleanedForBlocker.match(/^\[depends_on:task:([^:]+):([^\]]+)\]\s*\n?([\s\S]*)$/i)
@@ -47,7 +49,7 @@ export function parseTaskBlocker(desc?: string | null): TaskBlockerInfo {
   }
 
   // 2. Bloqueur par événement calendrier : [depends_on:event:<eventId>]
-  const eventMatch = desc.match(/^\[depends_on:event:([^\]]+)\]\s*\n?([\s\S]*)$/i)
+  const eventMatch = cleanedForBlocker.match(/^\[depends_on:event:([^\]]+)\]\s*\n?([\s\S]*)$/i)
   if (eventMatch) {
     return {
       type: 'event',
@@ -58,7 +60,7 @@ export function parseTaskBlocker(desc?: string | null): TaskBlockerInfo {
   }
 
   // 3. Bloqueur par date précise : [depends_on:date:<YYYY-MM-DD>]
-  const dateMatch = desc.match(/^\[depends_on:date:([0-9]{4}-[0-9]{2}-[0-9]{2})\]\s*\n?([\s\S]*)$/i)
+  const dateMatch = cleanedForBlocker.match(/^\[depends_on:date:([0-9]{4}-[0-9]{2}-[0-9]{2})\]\s*\n?([\s\S]*)$/i)
   if (dateMatch) {
     return {
       type: 'date',
@@ -69,7 +71,7 @@ export function parseTaskBlocker(desc?: string | null): TaskBlockerInfo {
   }
 
   // 4. Format historique : [depends_on:<taskId>:<status>]
-  const legacyMatch = desc.match(/^\[depends_on:([^:]+):([^\]]+)\]\s*\n?([\s\S]*)$/i)
+  const legacyMatch = cleanedForBlocker.match(/^\[depends_on:([^:]+):([^\]]+)\]\s*\n?([\s\S]*)$/i)
   if (legacyMatch) {
     return {
       type: 'task',
@@ -79,7 +81,7 @@ export function parseTaskBlocker(desc?: string | null): TaskBlockerInfo {
     }
   }
 
-  return { type: 'none', requiredStatus: 'fait', cleanDescription: desc }
+  return { type: 'none', requiredStatus: 'fait', cleanDescription: cleanedForBlocker.trim() }
 }
 
 /**

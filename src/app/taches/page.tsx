@@ -23,7 +23,7 @@ import {
   getTaskProject 
 } from '@/lib/projects'
 import { combineDateAndTime, normalizeTaskCategory, TASK_CATEGORIES } from '@/lib/utils'
-import { calculateTaskTemperature, calculateUpdatedAtForScore } from '@/lib/task-temperature'
+import { calculateTaskTemperature, calculateUpdatedAtForScore, formatTaskDescriptionWithHeatRef, getTaskHeatRefDate } from '@/lib/task-temperature'
 import { TaskCard } from '@/components/tasks/TaskCard'
 import { TaskFilters, ChantierFilterMode } from '@/components/tasks/TaskFilters'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
@@ -151,13 +151,29 @@ function TasksContent() {
       updatedDesc = formatTaskWithWaitingReturn(updatedDesc, null)
     }
 
+    const wasFait = currentTask.status === 'fait'
+    const isNowFait = newStatus === 'fait'
+    const existingHeatDate = (!wasFait && isNowFait)
+      ? null
+      : (wasFait && !isNowFait)
+      ? new Date().toISOString()
+      : getTaskHeatRefDate(currentTask)
+
+    if (existingHeatDate) {
+      updatedDesc = formatTaskDescriptionWithHeatRef(updatedDesc, existingHeatDate)
+    }
+
+    const updatePayload: Record<string, any> = { 
+      status: newStatus,
+      description: updatedDesc
+    }
+    if (existingHeatDate) {
+      updatePayload.updated_at = existingHeatDate
+    }
+
     const { error } = await supabase
       .from('tasks')
-      .update({ 
-        status: newStatus,
-        description: updatedDesc,
-        updated_at: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq('id', taskId)
 
     if (!error) {
@@ -184,13 +200,17 @@ function TasksContent() {
     if (!task) return
 
     const newUpdatedAt = calculateUpdatedAtForScore(task, targetScore)
+    const newDesc = formatTaskDescriptionWithHeatRef(task.description, newUpdatedAt)
     const { error } = await supabase
       .from('tasks')
-      .update({ updated_at: newUpdatedAt })
+      .update({ 
+        description: newDesc,
+        updated_at: newUpdatedAt 
+      })
       .eq('id', taskId)
 
     if (!error) {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, updated_at: newUpdatedAt } : t))
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, description: newDesc, updated_at: newUpdatedAt } : t))
       showNotification(`✓ Température de la tâche calée à ${targetScore}% avec succès !`)
     }
   }
@@ -370,15 +390,29 @@ function TasksContent() {
       const wasFait = editingTask.status === 'fait'
       const isNowFait = formData.status === 'fait'
 
+      // Préserver la date d'ancrage thermique existante pour ne pas remettre la chaleur à zéro lors d'un enregistrement
+      const existingHeatDate = (!wasFait && isNowFait)
+        ? null
+        : (wasFait && !isNowFait)
+        ? new Date().toISOString()
+        : getTaskHeatRefDate(editingTask)
+
+      finalDescription = formatTaskDescriptionWithHeatRef(finalDescription, existingHeatDate)
+
+      const updatePayload: Record<string, any> = {
+        title: formData.title,
+        description: finalDescription,
+        category: formData.category,
+        priority: formData.priority,
+        status: formData.status
+      }
+      if (existingHeatDate) {
+        updatePayload.updated_at = existingHeatDate
+      }
+
       const { data, error } = await supabase
         .from('tasks')
-        .update({
-          title: formData.title,
-          description: finalDescription,
-          category: formData.category,
-          priority: formData.priority,
-          status: formData.status
-        })
+        .update(updatePayload)
         .eq('id', editingTask.id)
         .select()
         .single()
@@ -392,6 +426,9 @@ function TasksContent() {
         }
       }
     } else {
+      const initialHeatDate = new Date().toISOString()
+      finalDescription = formatTaskDescriptionWithHeatRef(finalDescription, initialHeatDate)
+
       const { data, error } = await supabase
         .from('tasks')
         .insert([{

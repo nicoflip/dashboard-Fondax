@@ -233,6 +233,7 @@ export function useReportData() {
   const formatTaskDesc = (desc: string | null) => {
     if (!desc) return null
     return desc
+      .replace(/\[heat_ref:[^\]]+\]\s*/gi, '')
       .replace(/\[chantier_id:[^\]]+\]/g, '')
       .replace(/\[Période flexible\s*:\s*[^\]]+\]/g, '')
       .replace(/\[(?:CLOTURE|CLÔTURE|RESOLUTION|RÉSOLUTION)\s*:\s*[^\]]+\]/gi, '')

@@ -22,7 +22,7 @@ import {
 import { formatTaskDescriptionWithBlocker, sortTasksWithBlockers } from '@/lib/blockers'
 import { formatTaskDescriptionWithProject } from '@/lib/projects'
 import { removeWaitingTag } from '@/lib/waiting'
-import { calculateTaskTemperature, formatInactiveTime } from '@/lib/task-temperature'
+import { calculateTaskTemperature, formatInactiveTime, formatTaskDescriptionWithHeatRef, getTaskHeatRefDate } from '@/lib/task-temperature'
 import { formatTaskDescriptionWithClosure } from '@/lib/closure-comments'
 import { useTaskThermostat } from '@/lib/task-thermostat'
 import { ThermostatPauseBanner } from '@/components/tasks/ThermostatPauseBanner'
@@ -167,15 +167,29 @@ export default function Dashboard() {
       const wasFait = editingTask.status === 'fait'
       const isNowFait = formData.status === 'fait'
 
+      // Préserver la date d'ancrage thermique existante pour ne pas remettre la chaleur à zéro lors d'un enregistrement
+      const existingHeatDate = (!wasFait && isNowFait)
+        ? null
+        : (wasFait && !isNowFait)
+        ? new Date().toISOString()
+        : getTaskHeatRefDate(editingTask)
+
+      finalDescription = formatTaskDescriptionWithHeatRef(finalDescription, existingHeatDate)
+
+      const updatePayload: Record<string, any> = {
+        title: formData.title,
+        description: finalDescription,
+        category: formData.category,
+        priority: formData.priority,
+        status: formData.status
+      }
+      if (existingHeatDate) {
+        updatePayload.updated_at = existingHeatDate
+      }
+
       const { data, error } = await supabase
         .from('tasks')
-        .update({
-          title: formData.title,
-          description: finalDescription,
-          category: formData.category,
-          priority: formData.priority,
-          status: formData.status
-        })
+        .update(updatePayload)
         .eq('id', editingTask.id)
         .select()
         .single()
@@ -191,6 +205,9 @@ export default function Dashboard() {
         fetchData()
       }
     } else {
+      const initialHeatDate = new Date().toISOString()
+      finalDescription = formatTaskDescriptionWithHeatRef(finalDescription, initialHeatDate)
+
       const { data, error } = await supabase
         .from('tasks')
         .insert([{
