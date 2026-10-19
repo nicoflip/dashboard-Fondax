@@ -6,8 +6,11 @@ export const metadata: Metadata = {
   title: 'Dashboard IT — Fondax',
   description: 'Tableau de bord de suivi IT pour Fondax SARL',
   icons: {
-    icon: '/favicon.png',
-    shortcut: '/favicon.png',
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/favicon.png', type: 'image/png' },
+    ],
+    shortcut: '/favicon.ico',
     apple: '/apple-icon.png',
   },
 }
