@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate, formatEventDateTime, combineDateAndTime } from '@/lib/utils'
-import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Flame, FolderKanban, Hourglass, Plus, Thermometer } from 'lucide-react'
+import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Eye, Flame, FolderKanban, Hourglass, Plus, Thermometer } from 'lucide-react'
 import { Task, Project, CalendarEvent, WaitingReturn } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
@@ -58,6 +58,7 @@ export default function Dashboard() {
 
   // Task form modal state
   const [isTaskFormOpen, setIsTaskFormOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [initialFormData, setInitialFormData] = useState<Partial<TaskFormData> | null>(null)
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null)
 
@@ -133,6 +134,12 @@ export default function Dashboard() {
     fetchData()
   }, [thermostat.isPaused])
 
+  const handleOpenTaskDetails = (task: Task) => {
+    setEditingTask(task)
+    setInitialFormData(null)
+    setIsTaskFormOpen(true)
+  }
+
   const handleSaveTask = async (formData: TaskFormData) => {
     let finalDescription = formatTaskDescriptionWithBlocker(
       formData.description,
@@ -156,53 +163,82 @@ export default function Dashboard() {
       finalDescription = formatTaskDescriptionWithClosure(finalDescription, formData.conclusion || null) || ''
     }
 
-    const { data, error } = await supabase
-      .from('tasks')
-      .insert([{
-        title: formData.title,
-        description: finalDescription,
-        category: formData.category,
-        priority: formData.priority,
-        status: formData.status
-      }])
-      .select()
-      .single()
+    if (editingTask) {
+      const wasFait = editingTask.status === 'fait'
+      const isNowFait = formData.status === 'fait'
 
-    if (data && !error) {
-      setIsTaskFormOpen(false)
-      setInitialFormData(null)
+      const { data, error } = await supabase
+        .from('tasks')
+        .update({
+          title: formData.title,
+          description: finalDescription,
+          category: formData.category,
+          priority: formData.priority,
+          status: formData.status
+        })
+        .eq('id', editingTask.id)
+        .select()
+        .single()
 
-      if (formData.createAlsoEvent) {
-        const baseEventDate = formData.eventDate || new Date().toISOString().split('T')[0]
-        const eventDate = combineDateAndTime(baseEventDate, formData.eventTime)
-        const eventType = formData.eventType || 'échéance'
-        let finalEndDate = formData.eventEndDate ? combineDateAndTime(formData.eventEndDate, formData.eventTime) : null
-        if (formData.eventIsFlexible && !finalEndDate) {
-          const d = new Date(baseEventDate + 'T00:00:00')
-          d.setDate(d.getDate() + 14)
-          finalEndDate = d.toISOString().split('T')[0]
+      if (data && !error) {
+        setIsTaskFormOpen(false)
+        setEditingTask(null)
+        if (!wasFait && isNowFait) {
+          setFollowUpTask(data)
+          setIsFollowUpOpen(true)
         }
-        const baseDesc = formData.description.trim() || ''
-        const finalDesc = formData.eventIsFlexible 
-          ? formatFlexibleEventDescription(baseDesc, formData.eventFlexLabel || 'Dans les 2 prochaines semaines')
-          : baseDesc
-
-        await supabase
-          .from('events')
-          .insert([{
-            title: formData.title,
-            description: finalDesc,
-            event_date: eventDate,
-            end_date: formData.eventIsFlexible ? finalEndDate : null,
-            event_type: eventType,
-            status: 'à venir',
-            task_id: data.id,
-            vendor_id: null
-          }])
+        showNotification(`✓ Tâche "${formData.title}" mise à jour avec succès !`)
+        fetchData()
       }
+    } else {
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert([{
+          title: formData.title,
+          description: finalDescription,
+          category: formData.category,
+          priority: formData.priority,
+          status: formData.status
+        }])
+        .select()
+        .single()
 
-      showNotification(`✓ Tâche "${formData.title}" créée avec succès !`)
-      fetchData()
+      if (data && !error) {
+        setIsTaskFormOpen(false)
+        setInitialFormData(null)
+
+        if (formData.createAlsoEvent) {
+          const baseEventDate = formData.eventDate || new Date().toISOString().split('T')[0]
+          const eventDate = combineDateAndTime(baseEventDate, formData.eventTime)
+          const eventType = formData.eventType || 'échéance'
+          let finalEndDate = formData.eventEndDate ? combineDateAndTime(formData.eventEndDate, formData.eventTime) : null
+          if (formData.eventIsFlexible && !finalEndDate) {
+            const d = new Date(baseEventDate + 'T00:00:00')
+            d.setDate(d.getDate() + 14)
+            finalEndDate = d.toISOString().split('T')[0]
+          }
+          const baseDesc = formData.description.trim() || ''
+          const finalDesc = formData.eventIsFlexible 
+            ? formatFlexibleEventDescription(baseDesc, formData.eventFlexLabel || 'Dans les 2 prochaines semaines')
+            : baseDesc
+
+          await supabase
+            .from('events')
+            .insert([{
+              title: formData.title,
+              description: finalDesc,
+              event_date: eventDate,
+              end_date: formData.eventIsFlexible ? finalEndDate : null,
+              event_type: eventType,
+              status: 'à venir',
+              task_id: data.id,
+              vendor_id: null
+            }])
+        }
+
+        showNotification(`✓ Tâche "${formData.title}" créée avec succès !`)
+        fetchData()
+      }
     }
   }
 
@@ -229,24 +265,6 @@ export default function Dashboard() {
     }))
   }
 
-  const toggleTaskStatus = async (task: Task) => {
-    const newStatus = task.status === 'en cours' ? 'fait' : 'en cours'
-    const { error } = await supabase
-      .from('tasks')
-      .update({ status: newStatus })
-      .eq('id', task.id)
-    
-    if (!error) {
-      setHighPriorityTasks(prev => 
-        prev.map(t => t.id === task.id ? { ...t, status: newStatus as any } : t)
-      )
-      if (newStatus === 'fait') {
-        setFollowUpTask(task)
-        setIsFollowUpOpen(true)
-      }
-    }
-  }
-
   if (loading) return <div className="p-8 text-center text-slate-500">Chargement du tableau de bord...</div>
 
   return (
@@ -256,6 +274,7 @@ export default function Dashboard() {
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Tableau de Bord IT</h1>
         <Button 
           onClick={() => {
+            setEditingTask(null)
             setInitialFormData(null)
             setIsTaskFormOpen(true)
           }} 
@@ -390,7 +409,20 @@ export default function Dashboard() {
                 highPriorityTasks.map(task => {
                   const temp = calculateTaskTemperature(task, new Date(), thermostat)
                   return (
-                    <div key={task.id} className="flex flex-col gap-2 rounded-lg border border-red-200 border-l-[5px] border-l-red-600 bg-red-50/40 p-3.5 shadow-xs transition-colors hover:bg-red-50/70">
+                    <div 
+                      key={task.id} 
+                      onClick={() => handleOpenTaskDetails(task)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          handleOpenTaskDetails(task)
+                        }
+                      }}
+                      className="group flex flex-col gap-2 rounded-lg border border-red-200 border-l-[5px] border-l-red-600 bg-red-50/40 p-3.5 shadow-xs transition-all hover:bg-red-50/80 hover:border-red-400 hover:shadow-md cursor-pointer"
+                      title="Cliquer pour afficher les détails de la tâche"
+                    >
                       <div className="flex items-start justify-between gap-2">
                         <div className="space-y-1.5 flex-1 min-w-0 pr-2">
                           <div className="flex items-center gap-2 flex-wrap">
@@ -400,7 +432,9 @@ export default function Dashboard() {
                             )}>
                               <Flame className="w-3 h-3 fill-amber-300 text-amber-300" /> {temp.score}%
                             </span>
-                            <h4 className="font-bold text-slate-950 text-sm truncate" title={task.title}>{task.title}</h4>
+                            <h4 className="font-bold text-slate-950 text-sm truncate group-hover:text-red-700 transition-colors" title={task.title}>
+                              {task.title}
+                            </h4>
                           </div>
                           <div className="flex items-center gap-2 flex-wrap pt-0.5">
                             <Badge variant="outline" className="text-xs border-red-200 bg-white text-slate-700">{task.category}</Badge>
@@ -413,10 +447,15 @@ export default function Dashboard() {
                         <Button 
                           variant="outline" 
                           size="sm" 
-                          className="shrink-0 font-medium hover:bg-red-100 border-red-200 text-red-900 cursor-pointer"
-                          onClick={() => toggleTaskStatus(task)}
+                          className="shrink-0 font-medium hover:bg-red-100 border-red-300 text-red-900 cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleOpenTaskDetails(task)
+                          }}
+                          title="Afficher les détails de la tâche"
                         >
-                          {task.status === 'en cours' ? 'Terminer' : 'Reprendre'}
+                          <Eye className="h-3.5 w-3.5 text-red-700" />
+                          Détails
                         </Button>
                       </div>
                       <div className="w-full bg-slate-200/70 rounded-full h-1.5 overflow-hidden">
@@ -640,18 +679,20 @@ export default function Dashboard() {
         }}
       />
 
-      {/* Dialogue de création de tâche complète */}
+      {/* Dialogue de création / modification de tâche complète */}
       <TaskFormDialog
         open={isTaskFormOpen}
         onClose={() => {
           setIsTaskFormOpen(false)
           setInitialFormData(null)
+          setEditingTask(null)
         }}
-        editingTask={null}
+        editingTask={editingTask}
         initialData={initialFormData}
         onBackToFollowUp={followUpTask ? () => {
           setIsTaskFormOpen(false)
           setInitialFormData(null)
+          setEditingTask(null)
           setIsFollowUpOpen(true)
         } : undefined}
         tasks={allTasks}
