@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn, PRIORITY_COLORS, STATUS_COLORS, EVENT_TYPE_LABELS, formatDate, formatEventDateTime, combineDateAndTime } from '@/lib/utils'
-import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Eye, Flame, FolderKanban, Hourglass, Plus, Thermometer } from 'lucide-react'
+import { AlertCircle, Calendar, CheckCircle2, ClipboardList, Clock, Eye, Flame, FolderKanban, Hourglass, Lock, Plus, Thermometer } from 'lucide-react'
 import { Task, Project, CalendarEvent, WaitingReturn } from '@/lib/types'
 import { TaskFollowUpDialog } from '@/components/tasks/TaskFollowUpDialog'
 import { TaskFormDialog, TaskFormData } from '@/components/tasks/TaskFormDialog'
@@ -19,7 +19,7 @@ import {
   formatTaskWithWaitingReturn,
   createWaitingReturn
 } from '@/lib/waiting-returns'
-import { formatTaskDescriptionWithBlocker, sortTasksWithBlockers } from '@/lib/blockers'
+import { formatTaskDescriptionWithBlocker, sortTasksWithBlockers, checkTaskBlocked } from '@/lib/blockers'
 import { formatTaskDescriptionWithProject } from '@/lib/projects'
 import { removeWaitingTag } from '@/lib/waiting'
 import { calculateTaskTemperature, formatInactiveTime, formatTaskDescriptionWithHeatRef, getTaskHeatRefDate } from '@/lib/task-temperature'
@@ -31,6 +31,7 @@ import { WaitingResponseReceivedDialog } from '@/components/waiting/WaitingRespo
 export default function Dashboard() {
   const supabase = createClient()
   const thermostat = useTaskThermostat()
+  const [blockedTasksCount, setBlockedTasksCount] = useState(0)
   const [stats, setStats] = useState({ 
     openTasks: 0, 
     highPriorityTasks: 0, 
@@ -92,7 +93,8 @@ export default function Dashboard() {
       supabase.from('events').select('*').order('event_date', { ascending: true })
     ])
 
-    const activeReturns = (returnsRes || []).filter(r => r.status === 'en attente')
+    const allReturnsData = (returnsRes || []) as WaitingReturn[]
+    const activeReturns = allReturnsData.filter(r => r.status === 'en attente')
     const waitingDueCount = activeReturns.filter(r => {
       const metrics = getWaitingReturnMetrics(r)
       return metrics.followUpStatus === 'overdue' || metrics.followUpStatus === 'today'
@@ -103,13 +105,25 @@ export default function Dashboard() {
     }).length
 
     const allTasksData = (allTasksRes.data || []) as Task[]
-    const activeTasks = allTasksData.filter(t => t.status !== 'fait')
-    const nowDate = new Date()
-    const surchauffeTasks = activeTasks.filter(t => calculateTaskTemperature(t, nowDate, thermostat).score >= 70)
-    
-    // Trier les tâches actives par température décroissante pour afficher les plus brûlantes en haut
     const eventsList = (allEventsRes.data as CalendarEvent[]) || []
-    const sortedHottest = sortTasksWithBlockers(activeTasks, eventsList, activeReturns).slice(0, 5)
+
+    // Prédicat vérifiant si une tâche a une condition de blocage non remplie
+    const isTaskBlocked = (t: Task) => checkTaskBlocked(t, allTasksData, eventsList, allReturnsData).isBlocked
+
+    // Tâches actives non terminées
+    const activeTasks = allTasksData.filter(t => t.status !== 'fait')
+
+    // Tâches exploitables immédiatement : non faites, non bloquées par un prérequis, et non en attente d'un retour tiers
+    const actionableTasks = activeTasks.filter(t => !isTaskBlocked(t) && t.status !== 'en attente de retour externe')
+
+    const nowDate = new Date()
+    const surchauffeTasks = actionableTasks.filter(t => calculateTaskTemperature(t, nowDate, thermostat).score >= 70)
+    
+    // Trier les tâches exploitables par température décroissante pour afficher les plus brûlantes en haut (max 5)
+    const sortedHottest = sortTasksWithBlockers(actionableTasks, eventsList, allReturnsData, allTasksData, thermostat).slice(0, 5)
+
+    const blockedCount = activeTasks.filter(t => isTaskBlocked(t)).length
+    setBlockedTasksCount(blockedCount)
 
     setStats({
       openTasks: openTasksRes.count || 0,
@@ -280,6 +294,7 @@ export default function Dashboard() {
       ...prev,
       waitingTasksCount: Math.max(0, prev.waitingTasksCount - 1),
     }))
+    await fetchData()
   }
 
   if (loading) return <div className="p-8 text-center text-slate-500">Chargement du tableau de bord...</div>
@@ -409,7 +424,13 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-red-700 text-base font-bold">
                   <Flame className="h-5 w-5 fill-red-500 text-red-600 animate-pulse" />
-                  Tâches en surchauffe & prioritaires ({highPriorityTasks.length})
+                  <span>Tâches en surchauffe & prioritaires ({highPriorityTasks.length})</span>
+                  {blockedTasksCount > 0 && (
+                    <Badge variant="outline" className="text-[11px] font-normal border-slate-200 bg-slate-50 text-slate-600 flex items-center gap-1 ml-1" title={`${blockedTasksCount} tâche(s) avec prérequis non rempli masquée(s)`}>
+                      <Lock className="w-3 h-3 text-slate-400" />
+                      {blockedTasksCount} bloquée{blockedTasksCount > 1 ? 's' : ''}
+                    </Badge>
+                  )}
                 </CardTitle>
                 <Link 
                   href="/taches?tab=surchauffe" 
@@ -421,7 +442,15 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent className="space-y-3">
               {highPriorityTasks.length === 0 ? (
-                <p className="text-sm text-slate-500">Aucune tâche en surchauffe en attente.</p>
+                <div className="p-4 text-center text-sm text-slate-500 bg-slate-50 rounded-lg border border-dashed border-slate-200 space-y-1">
+                  <p>Aucune tâche en surchauffe à traiter immédiatement.</p>
+                  {blockedTasksCount > 0 && (
+                    <p className="text-xs text-slate-400 flex items-center justify-center gap-1">
+                      <Lock className="w-3 h-3 text-slate-400" />
+                      {blockedTasksCount} tâche{blockedTasksCount > 1 ? 's' : ''} en attente de déblocage (condition non remplie).
+                    </p>
+                  )}
+                </div>
               ) : (
                 highPriorityTasks.map(task => {
                   const temp = calculateTaskTemperature(task, new Date(), thermostat)

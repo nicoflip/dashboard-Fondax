@@ -607,7 +607,7 @@ function TasksContent() {
       return true
     })
 
-    return sortTasksWithBlockers(filtered, events, waitingReturns)
+    return sortTasksWithBlockers(filtered, events, waitingReturns, tasks, thermostat)
   }, [
     tasks, 
     events, 

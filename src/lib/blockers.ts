@@ -1,5 +1,6 @@
 import { Task, CalendarEvent, TaskStatus, TaskBlockerInfo, BlockerConfig, TaskBlockedStatus, WaitingReturn } from './types'
 import { calculateTaskTemperature } from './task-temperature'
+import { ThermostatState } from './task-thermostat'
 
 /**
  * Extrait les métadonnées de dépendance/blocage d'une tâche à partir de sa description textuelle.
@@ -180,10 +181,13 @@ export function checkTaskBlocked(
 export function sortTasksWithBlockers(
   tasks: Task[],
   allEvents: CalendarEvent[] = [],
-  allWaitingReturns: WaitingReturn[] = []
+  allWaitingReturns: WaitingReturn[] = [],
+  allTasksReference?: Task[],
+  thermostat?: ThermostatState
 ): Task[] {
   const prioOrder: Record<string, number> = { haute: 1, moyenne: 2, basse: 3 }
   const now = new Date()
+  const refTasks = allTasksReference || tasks
 
   return [...tasks].sort((a, b) => {
     // 1. Terminées tout en bas
@@ -194,15 +198,15 @@ export function sortTasksWithBlockers(
 
     // 2. Pour les tâches actives, les non-bloquées passent avant les bloquées
     if (!isDoneA && !isDoneB) {
-      const blockedA = checkTaskBlocked(a, tasks, allEvents, allWaitingReturns).isBlocked
-      const blockedB = checkTaskBlocked(b, tasks, allEvents, allWaitingReturns).isBlocked
+      const blockedA = checkTaskBlocked(a, refTasks, allEvents, allWaitingReturns).isBlocked
+      const blockedB = checkTaskBlocked(b, refTasks, allEvents, allWaitingReturns).isBlocked
       if (blockedA && !blockedB) return 1
       if (!blockedA && blockedB) return -1
     }
 
     // 3. Tri par température / indice de latence décroissant (les plus chaudes en haut)
-    const tempA = calculateTaskTemperature(a, now).score
-    const tempB = calculateTaskTemperature(b, now).score
+    const tempA = calculateTaskTemperature(a, now, thermostat).score
+    const tempB = calculateTaskTemperature(b, now, thermostat).score
     if (tempA !== tempB) return tempB - tempA
 
     // 4. Tri secondaire par priorité nominale
